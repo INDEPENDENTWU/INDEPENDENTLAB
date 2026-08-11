@@ -23,11 +23,12 @@
   let stream = null;
   let raf = 0;
   let lastScan = 0;
+  let scanStarted = 0;
+  let hintStage = 0;
   let copyValue = '';
   let nativeDetector = null;
   let decoderPromise = null;
 
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const decoderFn = () =>
     typeof window.jsQR === 'function'
       ? window.jsQR
@@ -52,45 +53,44 @@
   function loadScript(src, timeout = 4200) {
     return new Promise((resolve) => {
       const script = document.createElement('script');
-      let finished = false;
-      const done = (ok) => {
-        if (finished) return;
-        finished = true;
+      let done = false;
+      const finish = (ok) => {
+        if (done) return;
+        done = true;
         clearTimeout(timer);
         script.onload = null;
         script.onerror = null;
         if (!ok) script.remove();
         resolve(ok);
       };
-      const timer = setTimeout(() => done(false), timeout);
+      const timer = setTimeout(() => finish(false), timeout);
       script.src = src;
       script.async = true;
-      script.onload = () => done(true);
-      script.onerror = () => done(false);
+      script.onload = () => finish(true);
+      script.onerror = () => finish(false);
       document.head.appendChild(script);
     });
   }
 
   async function ensureDecoder() {
-    if (decoderFn()) return true;
+    if (decoderFn() || nativeDetector) return true;
     if (decoderPromise) return decoderPromise;
 
     decoderPromise = (async () => {
-      const sources = [
-        'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js',
-        'https://unpkg.com/jsqr@1.4.0/dist/jsQR.js',
-      ];
-
-      for (const src of sources) {
-        const loaded = await loadScript(src);
-        if (loaded && decoderFn()) return true;
-      }
-
       if ('BarcodeDetector' in window) {
         try {
           nativeDetector = new BarcodeDetector({ formats: ['qr_code'] });
           return true;
         } catch {}
+      }
+
+      const sources = [
+        'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js',
+        'https://unpkg.com/jsqr@1.4.0/dist/jsQR.js',
+      ];
+      for (const src of sources) {
+        const loaded = await loadScript(src);
+        if (loaded && decoderFn()) return true;
       }
       return false;
     })();
@@ -98,15 +98,10 @@
     return decoderPromise;
   }
 
-  function pointsFrom(code) {
-    const loc = code?.location;
-    if (!loc) return null;
-    return [
-      loc.topLeftCorner,
-      loc.topRightCorner,
-      loc.bottomRightCorner,
-      loc.bottomLeftCorner,
-    ].filter(Boolean);
+  function codePoints(code) {
+    const l = code?.location;
+    if (!l) return null;
+    return [l.topLeftCorner, l.topRightCorner, l.bottomRightCorner, l.bottomLeftCorner].filter(Boolean);
   }
 
   async function decodeCanvas(canvas) {
@@ -114,10 +109,8 @@
     if (fn) {
       const ctx = canvas.getContext('2d', { willReadFrequently: true });
       const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const code = fn(image.data, canvas.width, canvas.height, {
-        inversionAttempts: 'attemptBoth',
-      });
-      return code ? { data: code.data, points: pointsFrom(code) } : null;
+      const code = fn(image.data, canvas.width, canvas.height, { inversionAttempts: 'attemptBoth' });
+      return code ? { data: code.data, points: codePoints(code) } : null;
     }
 
     if (nativeDetector) {
@@ -145,10 +138,15 @@
     video.srcObject = null;
   }
 
-  function resetView() {
+  function leaveCamera() {
     stopCamera();
-    intro.hidden = false;
     scanner.hidden = true;
+    document.body.classList.remove('camera-open');
+  }
+
+  function resetView() {
+    leaveCamera();
+    intro.hidden = false;
     result.hidden = true;
     again.hidden = true;
     copyValue = '';
@@ -160,29 +158,43 @@
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
-  function fitCanvasFromVideo() {
+  function captureFinder() {
     const vw = video.videoWidth;
     const vh = video.videoHeight;
     if (!vw || !vh) return false;
 
-    const max = 760;
-    const scale = Math.min(1, max / Math.max(vw, vh));
-    analysis.width = Math.max(2, Math.round(vw * scale));
-    analysis.height = Math.max(2, Math.round(vh * scale));
+    const side = Math.max(2, Math.round(Math.min(vw, vh) * 0.72));
+    const sx = Math.round((vw - side) / 2);
+    const sy = Math.round((vh - side) / 2);
+    const out = Math.min(820, side);
+
+    analysis.width = out;
+    analysis.height = out;
     analysis
       .getContext('2d', { willReadFrequently: true })
-      .drawImage(video, 0, 0, analysis.width, analysis.height);
+      .drawImage(video, sx, sy, side, side, 0, 0, out, out);
     return true;
+  }
+
+  function updateScanHint(now) {
+    const elapsed = now - scanStarted;
+    if (elapsed > 7800 && hintStage < 2) {
+      hintStage = 2;
+      scanState.textContent = '换个角度，让二维码更清楚。';
+    } else if (elapsed > 3800 && hintStage < 1) {
+      hintStage = 1;
+      scanState.textContent = '靠近一点，保持二维码完整。';
+    }
   }
 
   async function scanLoop(ts) {
     if (!stream) return;
+    updateScanHint(ts);
 
-    if (ts - lastScan > 125 && fitCanvasFromVideo()) {
+    if (ts - lastScan > 135 && captureFinder()) {
       lastScan = ts;
       const code = await decodeCanvas(analysis);
       if (code) {
-        stopCamera();
         await showDecoded(code, analysis);
         return;
       }
@@ -200,25 +212,30 @@
       stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: { ideal: 'environment' },
-          width: { ideal: 1280 },
-          height: { ideal: 1280 },
+          width: { ideal: 1920 },
+          height: { ideal: 1920 },
         },
         audio: false,
       });
 
       intro.hidden = true;
       result.hidden = true;
-      scanner.hidden = false;
       again.hidden = true;
+      scanner.hidden = false;
+      document.body.classList.add('camera-open');
       video.srcObject = stream;
       await video.play();
-      scanState.textContent = '把二维码放进框里。';
+
+      scanState.textContent = '把二维码完整放进框里。';
+      scanStarted = performance.now();
+      hintStage = 0;
       lastScan = 0;
       raf = requestAnimationFrame(scanLoop);
     } catch (e) {
-      stopCamera();
+      leaveCamera();
+      intro.hidden = false;
       if (e?.message === 'decoder') {
-        showError('二维码识别组件没有加载成功。换个网络后再试，或者稍后重新打开。');
+        showError('二维码识别组件没有加载成功。换个网络后再试。');
       } else if (e?.name === 'NotAllowedError') {
         showError('没有获得相机权限。也可以直接选择二维码图片。');
       } else {
@@ -247,44 +264,32 @@
 
   async function scanImage(file) {
     if (!file || !file.type.startsWith('image/')) return;
-
     clearError();
     setBusy(true);
-    stopCamera();
+    leaveCamera();
 
     try {
       if (!(await ensureDecoder())) throw new Error('decoder');
-
       const img = await loadImage(file);
       const max = 1800;
-      const scale = Math.min(
-        1,
-        max / Math.max(img.naturalWidth, img.naturalHeight),
-      );
-
+      const scale = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
       analysis.width = Math.max(2, Math.round(img.naturalWidth * scale));
       analysis.height = Math.max(2, Math.round(img.naturalHeight * scale));
-      const ctx = analysis.getContext('2d', { willReadFrequently: true });
-      ctx.drawImage(img, 0, 0, analysis.width, analysis.height);
+      analysis
+        .getContext('2d', { willReadFrequently: true })
+        .drawImage(img, 0, 0, analysis.width, analysis.height);
 
       let code = await decodeCanvas(analysis);
-
       if (!code && Math.max(analysis.width, analysis.height) > 1050) {
         const tmp = document.createElement('canvas');
         const retryScale = 1050 / Math.max(analysis.width, analysis.height);
         tmp.width = Math.round(analysis.width * retryScale);
         tmp.height = Math.round(analysis.height * retryScale);
-        tmp
-          .getContext('2d', { willReadFrequently: true })
-          .drawImage(analysis, 0, 0, tmp.width, tmp.height);
-
+        tmp.getContext('2d', { willReadFrequently: true }).drawImage(analysis, 0, 0, tmp.width, tmp.height);
         code = await decodeCanvas(tmp);
         if (code?.points) {
           const back = 1 / retryScale;
-          code.points = code.points.map((p) => ({
-            x: p.x * back,
-            y: p.y * back,
-          }));
+          code.points = code.points.map((p) => ({ x: p.x * back, y: p.y * back }));
         }
       }
 
@@ -292,14 +297,9 @@
         showError('没有识别到二维码。换一张更清楚、二维码更完整的图片。');
         return;
       }
-
       await showDecoded(code, analysis);
     } catch (e) {
-      if (e?.message === 'decoder') {
-        showError('二维码识别组件没有加载成功。换个网络后再试，或者稍后重新打开。');
-      } else {
-        showError('这张图片没有成功打开或识别。');
-      }
+      showError(e?.message === 'decoder' ? '二维码识别组件没有加载成功。换个网络后再试。' : '这张图片没有成功打开或识别。');
     } finally {
       setBusy(false);
       photoInput.value = '';
@@ -311,7 +311,6 @@
     const ctx = specimen.getContext('2d');
     specimen.width = size;
     specimen.height = size;
-
     ctx.fillStyle = '#dcdad3';
     ctx.fillRect(0, 0, size, size);
 
@@ -320,14 +319,10 @@
     const dh = source.height * scale;
     const dx = (size - dw) / 2;
     const dy = (size - dh) / 2;
-
     ctx.drawImage(source, 0, 0, source.width, source.height, dx, dy, dw, dh);
 
     if (pts?.length >= 4) {
-      const p = pts.map((v) => ({
-        x: dx + v.x * scale,
-        y: dy + v.y * scale,
-      }));
+      const p = pts.map((v) => ({ x: dx + v.x * scale, y: dy + v.y * scale }));
       ctx.save();
       ctx.strokeStyle = '#009b86';
       ctx.lineWidth = 7;
@@ -349,24 +344,21 @@
 
   function addFact(label, value, options = {}) {
     if (value === undefined || value === null || value === '') return;
-
     const row = document.createElement('div');
     row.className = `fact${options.primary ? ' primary' : ''}`;
     const name = document.createElement('span');
     name.textContent = label;
-    const valueNode = document.createElement(options.href ? 'a' : 'strong');
+    const valueNode = document.createElement('strong');
     valueNode.textContent = String(value);
-    if (options.href) valueNode.href = options.href;
     if (options.warning) valueNode.classList.add('warning');
     row.append(name, valueNode);
     facts.append(row);
   }
 
-  function splitEscaped(text, sep) {
+  function splitEscaped(text, separator) {
     const out = [];
     let current = '';
     let escaped = false;
-
     for (const char of text) {
       if (escaped) {
         current += char;
@@ -374,12 +366,10 @@
       } else if (char === '\\') {
         current += char;
         escaped = true;
-      } else if (char === sep) {
+      } else if (char === separator) {
         out.push(current);
         current = '';
-      } else {
-        current += char;
-      }
+      } else current += char;
     }
     out.push(current);
     return out;
@@ -387,10 +377,9 @@
 
   const unescapeQR = (text) => text.replace(/\\([\\;,:])/g, '$1');
 
-  function parseWifi(raw) {
-    const body = raw.slice(5);
+  function parsePairs(raw, prefix) {
     const out = {};
-
+    const body = raw.replace(prefix, '').replace(/;;$/, '');
     for (const part of splitEscaped(body, ';')) {
       let escaped = false;
       let at = -1;
@@ -408,27 +397,14 @@
           break;
         }
       }
-      if (at > 0) {
-        out[part.slice(0, at)] = unescapeQR(part.slice(at + 1));
-      }
+      if (at > 0) out[part.slice(0, at).toUpperCase()] = unescapeQR(part.slice(at + 1));
     }
     return out;
   }
 
   function lineValue(raw, key) {
-    const re = new RegExp(`^${key}(?:;[^:]*)?:(.*)$`, 'mi');
-    const match = raw.match(re);
+    const match = raw.match(new RegExp(`^${key}(?:;[^:]*)?:(.*)$`, 'mi'));
     return match ? match[1].trim() : '';
-  }
-
-  function parseMecard(raw) {
-    const out = {};
-    const body = raw.replace(/^MECARD:/i, '').replace(/;;$/, '');
-    for (const part of splitEscaped(body, ';')) {
-      const at = part.indexOf(':');
-      if (at > 0) out[part.slice(0, at).toUpperCase()] = unescapeQR(part.slice(at + 1));
-    }
-    return out;
   }
 
   function classify(raw) {
@@ -437,7 +413,6 @@
     if (/^https?:\/\//i.test(s)) {
       try {
         const url = new URL(s);
-        const params = [...url.searchParams.keys()];
         return {
           headline: '网址',
           primary: url.hostname,
@@ -446,23 +421,15 @@
           facts: [
             ['协议', url.protocol === 'https:' ? 'HTTPS' : 'HTTP', { warning: url.protocol !== 'https:' }],
             ['路径', `${url.pathname}${url.search}${url.hash}` || '/'],
-            ['参数', params.length ? `${params.length} 项` : '无'],
+            ['参数', url.searchParams.size ? `${url.searchParams.size} 项` : '无'],
           ],
         };
       } catch {}
     }
 
     if (/^WIFI:/i.test(s)) {
-      const wifi = parseWifi(s);
+      const wifi = parsePairs(s, /^WIFI:/i);
       const encryption = (wifi.T || '').toUpperCase();
-      const encryptionLabel = encryption
-        ? encryption === 'NOPASS'
-          ? '无密码'
-          : encryption
-        : wifi.P
-          ? '未注明'
-          : '无密码';
-
       return {
         headline: 'Wi‑Fi 信息',
         primary: wifi.S || '未命名网络',
@@ -470,7 +437,7 @@
         copyLabel: wifi.P ? '复制密码' : '复制内容',
         facts: [
           ['网络名', wifi.S || ''],
-          ['加密', encryptionLabel],
+          ['加密', encryption === 'NOPASS' ? '无密码' : encryption || (wifi.P ? '未注明' : '无密码')],
           ['密码', wifi.P || ''],
         ],
       };
@@ -478,91 +445,51 @@
 
     if (/^TEL:/i.test(s)) {
       const number = s.replace(/^TEL:/i, '').trim();
-      return {
-        headline: '电话号码',
-        primary: number,
-        copy: number,
-        open: { href: `tel:${number}`, label: '拨号' },
-        facts: [],
-      };
+      return { headline: '电话号码', primary: number, copy: number, open: { href: `tel:${number}`, label: '拨号' }, facts: [] };
     }
 
     if (/^MAILTO:/i.test(s)) {
       try {
         const url = new URL(s);
-        const mail = decodeURIComponent(url.pathname);
+        const address = decodeURIComponent(url.pathname);
         return {
           headline: '邮件地址',
-          primary: mail,
-          copy: mail,
+          primary: address,
+          copy: address,
           open: { href: s, label: '写邮件' },
-          facts: [
-            ['主题', url.searchParams.get('subject') || ''],
-            ['正文', url.searchParams.get('body') || ''],
-          ],
+          facts: [['主题', url.searchParams.get('subject') || ''], ['正文', url.searchParams.get('body') || '']],
         };
       } catch {}
-    }
-
-    if (/^MATMSG:/i.test(s)) {
-      return {
-        headline: '邮件信息',
-        primary: lineValue(s.replace(/^MATMSG:/i, ''), 'TO') || '邮件',
-        copy: s,
-        facts: [
-          ['主题', lineValue(s, 'SUB')],
-          ['正文', lineValue(s, 'BODY')],
-        ],
-      };
     }
 
     if (/^(SMSTO:|SMS:)/i.test(s)) {
       const body = s.replace(/^(SMSTO:|SMS:)/i, '');
       const parts = body.split(':');
-      return {
-        headline: '短信',
-        primary: parts.shift() || '',
-        copy: s,
-        open: { href: s, label: '发短信' },
-        facts: [['内容', parts.join(':')]],
-      };
+      const number = parts.shift() || '';
+      return { headline: '短信', primary: number, copy: s, open: { href: s, label: '发短信' }, facts: [['内容', parts.join(':')]] };
     }
 
     if (/^GEO:/i.test(s)) {
-      const coord = s.replace(/^GEO:/i, '').split('?')[0];
-      return {
-        headline: '地理坐标',
-        primary: coord,
-        copy: coord,
-        facts: [],
-      };
-    }
-
-    if (/^BEGIN:VCARD/i.test(s)) {
-      const name = lineValue(s, 'FN') || lineValue(s, 'N');
-      return {
-        headline: '联系人',
-        primary: name || '联系人信息',
-        copy: s,
-        facts: [
-          ['电话', lineValue(s, 'TEL')],
-          ['邮箱', lineValue(s, 'EMAIL')],
-          ['组织', lineValue(s, 'ORG')],
-        ],
-      };
+      const coordinate = s.replace(/^GEO:/i, '').split('?')[0];
+      return { headline: '地理坐标', primary: coordinate, copy: coordinate, facts: [] };
     }
 
     if (/^MECARD:/i.test(s)) {
-      const card = parseMecard(s);
+      const card = parsePairs(s, /^MECARD:/i);
       return {
         headline: '联系人',
         primary: card.N || '联系人信息',
         copy: s,
-        facts: [
-          ['电话', card.TEL || ''],
-          ['邮箱', card.EMAIL || ''],
-          ['网址', card.URL || ''],
-        ],
+        facts: [['电话', card.TEL || ''], ['邮箱', card.EMAIL || ''], ['地址', card.ADR || '']],
+      };
+    }
+
+    if (/^BEGIN:VCARD/i.test(s)) {
+      return {
+        headline: '联系人',
+        primary: lineValue(s, 'FN') || lineValue(s, 'N') || '联系人信息',
+        copy: s,
+        facts: [['电话', lineValue(s, 'TEL')], ['邮箱', lineValue(s, 'EMAIL')], ['组织', lineValue(s, 'ORG')]],
       };
     }
 
@@ -571,11 +498,7 @@
         headline: '日历事件',
         primary: lineValue(s, 'SUMMARY') || '日历事件',
         copy: s,
-        facts: [
-          ['时间', lineValue(s, 'DTSTART')],
-          ['地点', lineValue(s, 'LOCATION')],
-          ['说明', lineValue(s, 'DESCRIPTION')],
-        ],
+        facts: [['时间', lineValue(s, 'DTSTART')], ['地点', lineValue(s, 'LOCATION')], ['说明', lineValue(s, 'DESCRIPTION')]],
       };
     }
 
@@ -586,11 +509,7 @@
           headline: '一次性验证码配置',
           primary: decodeURIComponent(url.pathname.replace(/^\//, '')) || '账户',
           copy: s,
-          facts: [
-            ['服务', url.searchParams.get('issuer') || ''],
-            ['算法', url.searchParams.get('algorithm') || '默认'],
-            ['位数', url.searchParams.get('digits') || '默认'],
-          ],
+          facts: [['服务', url.searchParams.get('issuer') || ''], ['算法', url.searchParams.get('algorithm') || '默认'], ['位数', url.searchParams.get('digits') || '默认']],
         };
       } catch {}
     }
@@ -604,29 +523,25 @@
   }
 
   async function showDecoded(code, source) {
-    stopCamera();
     const raw = (code.data || '').trim();
     if (!raw) {
-      showError('二维码里没有读到可显示的内容。');
+      showError('二维码里没有读到可以显示的内容。');
       return;
     }
 
     const info = classify(raw);
+    leaveCamera();
     intro.hidden = true;
-    scanner.hidden = true;
     result.hidden = false;
     again.hidden = false;
     clearError();
-
     drawSpecimen(source, code.points);
+
     kind.textContent = '06 / 已识别';
     headline.textContent = info.headline;
     facts.replaceChildren();
     addFact('', info.primary, { primary: true });
-    for (const fact of info.facts || []) {
-      addFact(fact[0], fact[1], fact[2] || {});
-    }
-
+    for (const fact of info.facts || []) addFact(fact[0], fact[1], fact[2] || {});
     rawValue.textContent = raw;
     copyValue = info.copy || raw;
     copyLabel.textContent = info.copyLabel || '复制内容';
@@ -641,28 +556,25 @@
       openBtn.removeAttribute('href');
     }
 
-    await sleep(10);
-    result.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    window.scrollTo({ top: 0, behavior: 'instant' });
   }
 
   async function copyCurrent() {
     if (!copyValue) return;
-
     try {
       await navigator.clipboard.writeText(copyValue);
     } catch {
-      const textarea = document.createElement('textarea');
-      textarea.value = copyValue;
-      textarea.style.position = 'fixed';
-      textarea.style.opacity = '0';
-      document.body.append(textarea);
-      textarea.select();
+      const t = document.createElement('textarea');
+      t.value = copyValue;
+      t.style.position = 'fixed';
+      t.style.opacity = '0';
+      document.body.append(t);
+      t.select();
       document.execCommand('copy');
-      textarea.remove();
+      t.remove();
     }
-
-    copyBtn.classList.add('done');
     const old = copyLabel.textContent;
+    copyBtn.classList.add('done');
     copyLabel.textContent = '已复制';
     setTimeout(() => {
       copyBtn.classList.remove('done');
@@ -672,21 +584,16 @@
 
   cameraBtn.onclick = startCamera;
   cancelCamera.onclick = () => {
-    stopCamera();
-    scanner.hidden = true;
+    leaveCamera();
     intro.hidden = false;
   };
-  photoInput.onchange = () =>
-    photoInput.files?.[0] && scanImage(photoInput.files[0]);
+  photoInput.onchange = () => photoInput.files?.[0] && scanImage(photoInput.files[0]);
   again.onclick = resetView;
   copyBtn.onclick = copyCurrent;
 
   document.addEventListener('paste', (event) => {
-    const file = [...(event.clipboardData?.files || [])].find((item) =>
-      item.type.startsWith('image/'),
-    );
+    const file = [...(event.clipboardData?.files || [])].find((f) => f.type.startsWith('image/'));
     if (file) scanImage(file);
   });
-
-  window.addEventListener('pagehide', stopCamera);
+  window.addEventListener('pagehide', leaveCamera);
 })();
