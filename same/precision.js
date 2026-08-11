@@ -2,6 +2,9 @@
   const $ = (s) => document.querySelector(s);
   const camera = $('#camera');
   const review = $('#review');
+  const reviewBody = $('.review-body');
+  const reviewTop = $('.review-top');
+  const reviewActions = $('.review-actions');
   const captureFrame = $('#captureFrame');
   const referenceBtn = $('#referenceBtn');
   const referenceModeValue = $('#referenceModeValue');
@@ -14,6 +17,7 @@
   const shutter = $('#shutter');
   const compare = $('#compare');
   const beforeImage = $('#beforeImage');
+  const afterWrap = $('#afterWrap');
   const afterImage = $('#afterImage');
   const saveCompare = $('#saveCompare');
   const saveCompareLabel = $('#saveCompareLabel');
@@ -21,11 +25,13 @@
   const useSavedRef = $('#useSavedRef');
   const forgetSavedRef = $('#forgetSavedRef');
   const referenceInput = $('#referenceInput');
+  const exitReview = $('#exitReview');
 
-  const PRESET_KEY = 'same-angle-preset-v3';
+  const PRESET_KEY = 'same-angle-preset-v4';
   const modes = [
     { kind: 'opacity', alpha: 0.45, label: '45%' },
     { kind: 'outline', label: '轮廓' },
+    { kind: 'split', label: '分屏' },
     { kind: 'difference', label: '差值' },
     { kind: 'opacity', alpha: 0.65, label: '65%' },
     { kind: 'opacity', alpha: 0.28, label: '28%' },
@@ -41,6 +47,7 @@
   function applyMode() {
     const mode = modes[modeIndex] || modes[0];
     captureFrame.classList.toggle('outline-mode', mode.kind === 'outline');
+    captureFrame.classList.toggle('split-mode', mode.kind === 'split');
     captureFrame.classList.toggle('difference-mode', mode.kind === 'difference');
     captureFrame.style.setProperty('--ghost', String(mode.alpha ?? 0.45));
     referenceModeValue.textContent = mode.label;
@@ -54,6 +61,41 @@
 
   function syncReviewMirror() {
     compare.classList.toggle('ref-mirrored', capturedRefMirrored);
+  }
+
+  function fitReviewSafely() {
+    if (review.hidden || !beforeImage.naturalWidth || !beforeImage.naturalHeight) return;
+    const style = getComputedStyle(reviewBody);
+    const padX = parseFloat(style.paddingLeft || '0') + parseFloat(style.paddingRight || '0');
+    const contentWidth = Math.max(180, reviewBody.clientWidth - padX - 2);
+    const viewportHeight = window.visualViewport?.height || window.innerHeight || document.documentElement.clientHeight;
+    const topHeight = reviewTop?.getBoundingClientRect().height || 62;
+    const actionsHeight = reviewActions?.getBoundingClientRect().height || 86;
+    const reserve = 112;
+    const contentHeight = Math.max(180, viewportHeight - topHeight - actionsHeight - reserve);
+    const ratio = beforeImage.naturalWidth / Math.max(1, beforeImage.naturalHeight);
+    let width = contentWidth;
+    let height = width / ratio;
+    if (height > contentHeight) {
+      height = contentHeight;
+      width = height * ratio;
+    }
+    width = Math.min(width, contentWidth);
+    height = width / ratio;
+    compare.style.width = `${Math.floor(width)}px`;
+    compare.style.height = `${Math.floor(height)}px`;
+    afterImage.style.width = `${Math.floor(width)}px`;
+    afterImage.style.height = `${Math.floor(height)}px`;
+    const slider = $('#compareSlider');
+    const pct = Math.max(0, Math.min(100, Number(slider?.value || 50)));
+    afterWrap.style.width = `${pct}%`;
+    const divider = $('#divider');
+    if (divider) divider.style.left = `${pct}%`;
+  }
+
+  function scheduleReviewFit() {
+    requestAnimationFrame(() => requestAnimationFrame(fitReviewSafely));
+    setTimeout(fitReviewSafely, 80);
   }
 
   referenceBtn.onclick = () => {
@@ -75,9 +117,15 @@
   }, true);
 
   const reviewObserver = new MutationObserver(() => {
-    if (!review.hidden) syncReviewMirror();
+    if (!review.hidden) {
+      syncReviewMirror();
+      scheduleReviewFit();
+    }
   });
   reviewObserver.observe(review, { attributes: true, attributeFilter: ['hidden'] });
+
+  beforeImage.addEventListener('load', scheduleReviewFit);
+  afterImage.addEventListener('load', scheduleReviewFit);
 
   referenceInput.addEventListener('change', () => {
     modeIndex = 0;
@@ -139,9 +187,7 @@
   if (rememberRef) {
     const originalRemember = rememberRef.onclick;
     rememberRef.onclick = async function (event) {
-      if (typeof originalRemember === 'function') {
-        await originalRemember.call(this, event);
-      }
+      if (typeof originalRemember === 'function') await originalRemember.call(this, event);
       writePreset();
     };
   }
@@ -149,9 +195,7 @@
   if (useSavedRef) {
     const originalUse = useSavedRef.onclick;
     useSavedRef.onclick = async function (event) {
-      if (typeof originalUse === 'function') {
-        await originalUse.call(this, event);
-      }
+      if (typeof originalUse === 'function') await originalUse.call(this, event);
       await sleep(50);
       await restorePreset();
     };
@@ -160,10 +204,14 @@
   if (forgetSavedRef) {
     const originalForget = forgetSavedRef.onclick;
     forgetSavedRef.onclick = async function (event) {
-      if (typeof originalForget === 'function') {
-        await originalForget.call(this, event);
-      }
+      if (typeof originalForget === 'function') await originalForget.call(this, event);
       try { localStorage.removeItem(PRESET_KEY); } catch {}
+    };
+  }
+
+  if (exitReview) {
+    exitReview.onclick = () => {
+      window.location.href = './';
     };
   }
 
@@ -194,10 +242,7 @@
 
   async function makeCorrectedCompare() {
     if (!beforeImage.src || !afterImage.src) return null;
-    const [before, after] = await Promise.all([
-      imageFromUrl(beforeImage.src),
-      imageFromUrl(afterImage.src),
-    ]);
+    const [before, after] = await Promise.all([imageFromUrl(beforeImage.src), imageFromUrl(afterImage.src)]);
     const ratio = before.naturalWidth / Math.max(1, before.naturalHeight);
     const longSide = 1200;
     let panelWidth;
@@ -272,6 +317,9 @@
   cameraObserver.observe(camera, { attributes: true, attributeFilter: ['hidden'] });
   document.addEventListener('visibilitychange', syncWake);
   window.addEventListener('pagehide', releaseWake);
+  window.addEventListener('resize', scheduleReviewFit);
+  window.visualViewport?.addEventListener('resize', scheduleReviewFit);
+  window.addEventListener('orientationchange', () => setTimeout(scheduleReviewFit, 120));
 
   applyMode();
   applyMirror();
