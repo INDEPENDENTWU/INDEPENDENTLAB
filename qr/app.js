@@ -206,9 +206,7 @@
     clearError();
     setBusy(true);
     try {
-      if (!(await ensureDecoder())) throw new Error('decoder');
       if (!navigator.mediaDevices?.getUserMedia) throw new Error('camera');
-
       stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: { ideal: 'environment' },
@@ -225,7 +223,10 @@
       document.body.classList.add('camera-open');
       video.srcObject = stream;
       await video.play();
+      scanState.textContent = '正在准备识别。';
 
+      if (!(await ensureDecoder())) throw new Error('decoder');
+      if (!stream) return;
       scanState.textContent = '把二维码完整放进框里。';
       scanStarted = performance.now();
       hintStage = 0;
@@ -413,6 +414,7 @@
     if (/^https?:\/\//i.test(s)) {
       try {
         const url = new URL(s);
+        const paramCount = [...url.searchParams].length;
         return {
           headline: '网址',
           primary: url.hostname,
@@ -421,7 +423,7 @@
           facts: [
             ['协议', url.protocol === 'https:' ? 'HTTPS' : 'HTTP', { warning: url.protocol !== 'https:' }],
             ['路径', `${url.pathname}${url.search}${url.hash}` || '/'],
-            ['参数', url.searchParams.size ? `${url.searchParams.size} 项` : '无'],
+            ['参数', paramCount ? `${paramCount} 项` : '无'],
           ],
         };
       } catch {}
@@ -556,7 +558,7 @@
       openBtn.removeAttribute('href');
     }
 
-    window.scrollTo({ top: 0, behavior: 'instant' });
+    window.scrollTo({ top: 0, behavior: 'auto' });
   }
 
   async function copyCurrent() {
