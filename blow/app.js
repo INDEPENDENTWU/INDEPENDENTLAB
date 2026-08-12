@@ -32,10 +32,12 @@
 
   async function loadPdfLibrary(){
     if(pdfjs)return pdfjs;
-    const urls=['https://cdn.jsdelivr.net/npm/pdfjs-dist@6.2.108/legacy/build/pdf.mjs','https://unpkg.com/pdfjs-dist@6.2.108/legacy/build/pdf.mjs'];
-    let last=null;for(const u of urls){try{pdfjs=await import(u);break}catch(e){last=e}}
-    if(!pdfjs)throw last||new Error('pdfjs');
-    pdfjs.GlobalWorkerOptions.workerSrc='https://cdn.jsdelivr.net/npm/pdfjs-dist@6.2.108/legacy/build/pdf.worker.mjs';return pdfjs;
+    const sources=[
+      {module:'https://cdn.jsdelivr.net/npm/pdfjs-dist@6.2.108/legacy/build/pdf.mjs',worker:'https://cdn.jsdelivr.net/npm/pdfjs-dist@6.2.108/legacy/build/pdf.worker.mjs'},
+      {module:'https://unpkg.com/pdfjs-dist@6.2.108/legacy/build/pdf.mjs',worker:'https://unpkg.com/pdfjs-dist@6.2.108/legacy/build/pdf.worker.mjs'}
+    ];
+    let last=null;for(const src of sources){try{pdfjs=await import(src.module);pdfjs.GlobalWorkerOptions.workerSrc=src.worker;break}catch(e){last=e;pdfjs=null}}
+    if(!pdfjs)throw last||new Error('pdfjs');return pdfjs;
   }
   async function openFiles(list){
     setError('');const files=[...list];if(!files.length)return;
@@ -59,8 +61,7 @@
     if(!kind)return;current=clamp(n,1,total);pageNow.textContent=String(current);prevBtn.disabled=current<=1;nextBtn.disabled=current>=total;
     if(flashDir)flashEdge(flashDir);
     if(kind==='images'){
-      const token=++renderToken;imagePage.src=imageUrls[current-1];try{await imagePage.decode()}catch{}if(token!==renderToken)return;
-      return;
+      const token=++renderToken;imagePage.src=imageUrls[current-1];try{await imagePage.decode()}catch{}if(token!==renderToken)return;return;
     }
     const token=++renderToken;try{renderTask?.cancel()}catch{}renderTask=null;
     const page=await pdfDoc.getPage(current);if(token!==renderToken)return;
@@ -77,8 +78,7 @@
   function feature(){
     if(!analyser)return{rms:0,ratio:0,flat:0};analyser.getFloatTimeDomainData(timeData);let sum=0;for(const v of timeData)sum+=v*v;const rms=Math.sqrt(sum/timeData.length);
     analyser.getFloatFrequencyData(freqData);const ny=audio.sampleRate/2,binHz=ny/freqData.length;let low=0,lowN=0,high=0,highN=0,logSum=0,arith=0,flatN=0;
-    for(let i=1;i<freqData.length;i++){const hz=i*binHz,db=freqData[i];if(!Number.isFinite(db))continue;const p=Math.pow(10,db/10);
-      if(hz>=120&&hz<=900){low+=p;lowN++}if(hz>=1200&&hz<=8500){high+=p;highN++;logSum+=Math.log(p+1e-14);arith+=p;flatN++}}
+    for(let i=1;i<freqData.length;i++){const hz=i*binHz,db=freqData[i];if(!Number.isFinite(db))continue;const p=Math.pow(10,db/10);if(hz>=120&&hz<=900){low+=p;lowN++}if(hz>=1200&&hz<=8500){high+=p;highN++;logSum+=Math.log(p+1e-14);arith+=p;flatN++}}
     const lo=low/Math.max(1,lowN),hi=high/Math.max(1,highN),ratio=hi/(lo+1e-14),geo=flatN?Math.exp(logSum/flatN):0,flat=geo/(arith/Math.max(1,flatN)+1e-14);return{rms,ratio,flat};
   }
   async function setupAudio(){
@@ -89,7 +89,7 @@
   async function collect(ms,onTick){const arr=[],start=performance.now();while(performance.now()-start<ms){const elapsed=performance.now()-start;arr.push(feature());onTick?.(elapsed,ms);await sleep(34)}return arr}
 
   function showCalibrationStart(){
-    learned=null;listening=false;cancelAnimationFrame(raf);raf=0;calibration.hidden=false;calStep.textContent='准备吹气';calValue.textContent='—';calHint.textContent='先让麦克风听一小会儿环境，再学一次你的吹气。';calAction.hidden=false;calAction.textContent='开启麦克风';calMode='start';micState.textContent='准备麦克风';breathText.textContent='完成一次吹气校准后开始';
+    learned=null;listening=false;cancelAnimationFrame(raf);raf=0;calibration.hidden=false;calStep.textContent='准备吹气';calValue.textContent='—';calHint.textContent='先让麦克风听一小会儿环境，再学一次你的吹气。';calAction.hidden=false;calAction.textContent='开启麦克风';calAction.disabled=false;calMode='start';micState.textContent='准备麦克风';breathText.textContent='完成一次吹气校准后开始';
   }
   async function beginAmbient(){
     if(busyCal)return;busyCal=true;calAction.disabled=true;
@@ -98,15 +98,13 @@
   }
   async function learnBlow(){
     if(busyCal||!analyser)return;busyCal=true;calAction.hidden=true;calStep.textContent='吹一下';calHint.textContent='现在对着手机底部吹一小口气';
-    const vals=await collect(2200,(e,m)=>calValue.textContent=((m-e)/1000).toFixed(1));const gate=Math.max(.006,ambient*2.5),strong=vals.filter(v=>v.rms>=gate).sort((a,b)=>b.rms-a.rms);const keep=strong.slice(0,Math.max(4,Math.ceil(strong.length*.55)));
+    const vals=await collect(2200,(e,m)=>calValue.textContent=((m-e)/1000).toFixed(1));const gate=Math.max(.006,ambient*2.5),strong=vals.filter(v=>v.rms>=gate).sort((a,b)=>b.rms-a.rms),keep=strong.slice(0,Math.max(4,Math.ceil(strong.length*.55)));
     if(keep.length<4){calStep.textContent='没有听清';calValue.textContent='—';calHint.textContent='靠近手机底部麦克风一点，再吹一次。';calAction.hidden=false;calAction.textContent='重新吹一次';calMode='learn';busyCal=false;return}
     learned={rms:median(keep.map(v=>v.rms)),ratio:median(keep.map(v=>v.ratio)),flat:median(keep.map(v=>v.flat))};
     if(!(learned.rms>gate)||!(learned.flat>.015)){calStep.textContent='这次不像吹气';calValue.textContent='—';calHint.textContent='不要说话，直接对着麦克风吹一小口气。';calAction.hidden=false;calAction.textContent='重新吹一次';calMode='learn';busyCal=false;return}
     calibration.hidden=true;calAction.hidden=true;calMode='done';micState.textContent='正在听吹气';breathText.textContent='短吹下一页 · 长吹上一页';listening=true;cooldownUntil=performance.now()+500;requestWake();startMonitor();busyCal=false;
   }
-  function isBreath(f){
-    if(!learned)return false;const rmsMin=Math.max(.0055,ambient*2.55,learned.rms*.27),ratioMin=Math.max(.22,learned.ratio*.34),flatMin=Math.max(.018,learned.flat*.38);return f.rms>=rmsMin&&f.ratio>=ratioMin&&f.flat>=flatMin;
-  }
+  function isBreath(f){if(!learned)return false;const rmsMin=Math.max(.0055,ambient*2.55,learned.rms*.27),ratioMin=Math.max(.22,learned.ratio*.34),flatMin=Math.max(.018,learned.flat*.38);return f.rms>=rmsMin&&f.ratio>=ratioMin&&f.flat>=flatMin}
   function startMonitor(){
     cancelAnimationFrame(raf);lastFrame=0;blowing=false;longDone=false;
     const loop=now=>{raf=requestAnimationFrame(loop);if(!listening||!analyser||now-lastFrame<30)return;lastFrame=now;const f=feature(),active=now>=cooldownUntil&&isBreath(f);
@@ -118,7 +116,7 @@
 
   choose.onclick=()=>filesInput.click();filesInput.onchange=()=>openFiles(filesInput.files);
   calAction.onclick=()=>calMode==='start'?beginAmbient():calMode==='learn'?learnBlow():null;
-  relearn.onclick=()=>{if(!reader.hidden){listening=false;showCalibrationStart();if(stream){cleanupAudio()}}};
+  relearn.onclick=()=>{if(reader.hidden)return;cleanupAudio();showCalibrationStart()};
   prevBtn.onclick=prevPage;nextBtn.onclick=nextPage;exit.onclick=closeReader;
   document.addEventListener('keydown',e=>{if(reader.hidden)return;if(e.key==='ArrowRight'||e.key==='PageDown')nextPage();if(e.key==='ArrowLeft'||e.key==='PageUp')prevPage()});
   stage.addEventListener('pointerdown',e=>{if(!calibration.hidden)return;pointerStart={x:e.clientX,y:e.clientY,id:e.pointerId}});
