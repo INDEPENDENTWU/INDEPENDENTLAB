@@ -1,5 +1,9 @@
-/* INDEPENDENT / supporting text system */
-small{font-size:14px!important;line-height:1.6!important;letter-spacing:0!important}
-.note,.privacy,.local-note,.source-note,.method,.result-note,.command-note,.hold-hint,.camera-hint,.review-copy,.line-note,.with-langs,.file-entry small,.saved-reference small,.intro>small,.intro small.note,.result-body>small,.result small.note,.setup-copy p,.run-state p,.privacy,.result-note{font-size:15px!important;line-height:1.62!important;font-weight:500}
-.copy p,.intro-copy p,.product-desc{max-width:680px}
-@media(max-width:540px){small{font-size:14px!important;line-height:1.58!important}.note,.privacy,.local-note,.source-note,.method,.result-note,.command-note,.hold-hint,.camera-hint,.review-copy,.line-note,.with-langs,.file-entry small,.saved-reference small,.intro>small,.result-body>small,.result small.note,.setup-copy p,.run-state p{font-size:14.5px!important;line-height:1.62!important}}
+/* INDEPENDENT supporting text system */
+:root{--ind-title:clamp(38px,8.8vw,50px);--ind-body:17px;--ind-small:14.5px}
+.copy h1,.intro-copy h1,.intro h1{font-size:var(--ind-title)!important;line-height:1!important;letter-spacing:-.045em!important;margin-bottom:18px!important}
+.copy p,.intro-copy p,.product-desc{font-size:var(--ind-body)!important;line-height:1.56!important;letter-spacing:-.012em!important;max-width:680px}
+.serial{font-size:var(--ind-small)!important;line-height:1.2!important;letter-spacing:.10em!important}
+small{font-size:var(--ind-small)!important;line-height:1.58!important;letter-spacing:0!important}
+.note,.privacy,.local-note,.source-note,.method,.result-note,.command-note,.hold-hint,.camera-hint,.review-copy,.line-note,.with-langs,.file-entry small,.saved-reference small,.intro>small,.result-body>small,.result small.note,.setup-copy p,.run-state p{font-size:15px!important;line-height:1.6!important;font-weight:500}
+button,input,select,textarea{font-family:inherit}
+@media(max-width:540px){:root{--ind-title:40px;--ind-body:16.5px;--ind-small:14px}.note,.privacy,.local-note,.source-note,.method,.result-note,.command-note,.hold-hint,.camera-hint,.review-copy,.line-note,.with-langs,.file-entry small,.saved-reference small,.intro>small,.result-body>small,.result small.note,.setup-copy p,.run-state p{font-size:14.5px!important;line-height:1.58!important}}
