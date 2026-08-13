@@ -1,0 +1,45 @@
+(()=>{
+'use strict';
+const $=s=>document.querySelector(s);
+const home=$('#home'),shoot=$('#shoot'),choose=$('#choose'),cameraInput=$('#cameraInput'),fileInput=$('#fileInput'),error=$('#error');
+const compare=$('#compare'),back=$('#back'),replace=$('#replace'),photoBox=$('#photoBox'),stage=$('#imageStage'),photo=$('#photo'),markerA=$('#markerA'),markerB=$('#markerB'),step=$('#step');
+const sampleA=$('#sampleA'),sampleB=$('#sampleB'),swatchA=$('#swatchA'),swatchB=$('#swatchB'),labelA=$('#labelA'),labelB=$('#labelB'),answer=$('#answer'),verdict=$('#verdict'),deltaEl=$('#delta'),difference=$('#difference'),quality=$('#quality'),reset=$('#reset'),canvas=$('#canvas');
+const ctx=canvas.getContext('2d',{willReadFrequently:true});
+let url='',active='a',points={a:null,b:null},samples={a:null,b:null},imgW=0,imgH=0;
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const median=a=>{if(!a.length)return 0;const s=[...a].sort((x,y)=>x-y),m=s.length>>1;return s.length%2?s[m]:(s[m-1]+s[m])/2};
+function setError(t=''){error.hidden=!t;error.textContent=t}
+function rgbToLab(r,g,b){
+ let R=r/255,G=g/255,B=b/255;R=R<=.04045?R/12.92:Math.pow((R+.055)/1.055,2.4);G=G<=.04045?G/12.92:Math.pow((G+.055)/1.055,2.4);B=B<=.04045?B/12.92:Math.pow((B+.055)/1.055,2.4);
+ let x=(R*.4124564+G*.3575761+B*.1804375)/.95047,y=(R*.2126729+G*.7151522+B*.0721750),z=(R*.0193339+G*.1191920+B*.9503041)/1.08883;
+ const f=t=>t>.008856?Math.cbrt(t):(7.787*t+16/116);x=f(x);y=f(y);z=f(z);return{L:116*y-16,a:500*(x-y),b:200*(y-z)}}
+function rad(d){return d*Math.PI/180}
+function deg(r){return r*180/Math.PI}
+function deltaE00(l1,l2){
+ const L1=l1.L,a1=l1.a,b1=l1.b,L2=l2.L,a2=l2.a,b2=l2.b,C1=Math.hypot(a1,b1),C2=Math.hypot(a2,b2),Cbar=(C1+C2)/2;
+ const G=.5*(1-Math.sqrt(Math.pow(Cbar,7)/(Math.pow(Cbar,7)+Math.pow(25,7))));
+ const ap1=(1+G)*a1,ap2=(1+G)*a2,Cp1=Math.hypot(ap1,b1),Cp2=Math.hypot(ap2,b2);
+ let hp1=deg(Math.atan2(b1,ap1));if(hp1<0)hp1+=360;let hp2=deg(Math.atan2(b2,ap2));if(hp2<0)hp2+=360;if(Cp1===0)hp1=0;if(Cp2===0)hp2=0;
+ const dLp=L2-L1,dCp=Cp2-Cp1;let dhp=0;if(Cp1*Cp2!==0){dhp=hp2-hp1;if(dhp>180)dhp-=360;else if(dhp<-180)dhp+=360}const dHp=2*Math.sqrt(Cp1*Cp2)*Math.sin(rad(dhp/2));
+ const Lbar=(L1+L2)/2,Cpbar=(Cp1+Cp2)/2;let hpbar;if(Cp1*Cp2===0)hpbar=hp1+hp2;else if(Math.abs(hp1-hp2)<=180)hpbar=(hp1+hp2)/2;else hpbar=(hp1+hp2+360)/2;if(hpbar>=360)hpbar-=360;
+ const T=1-.17*Math.cos(rad(hpbar-30))+.24*Math.cos(rad(2*hpbar))+.32*Math.cos(rad(3*hpbar+6))-.20*Math.cos(rad(4*hpbar-63));
+ const dTheta=30*Math.exp(-Math.pow((hpbar-275)/25,2)),Rc=2*Math.sqrt(Math.pow(Cpbar,7)/(Math.pow(Cpbar,7)+Math.pow(25,7))),Sl=1+.015*Math.pow(Lbar-50,2)/Math.sqrt(20+Math.pow(Lbar-50,2)),Sc=1+.045*Cpbar,Sh=1+.015*Cpbar*T,Rt=-Math.sin(rad(2*dTheta))*Rc;
+ const x=dLp/Sl,y=dCp/Sc,z=dHp/Sh;return Math.sqrt(x*x+y*y+z*z+Rt*y*z)
+}
+function fitStage(){if(!imgW||!imgH||compare.hidden)return;const box=photoBox.getBoundingClientRect(),ratio=imgW/imgH;let w=box.width,h=w/ratio;if(h>box.height){h=box.height;w=h*ratio}stage.style.width=`${Math.max(1,w)}px`;stage.style.height=`${Math.max(1,h)}px`;positionMarkers()}
+function positionMarkers(){for(const k of ['a','b']){const p=points[k],m=k==='a'?markerA:markerB;if(!p){m.hidden=true;continue}m.hidden=false;m.style.left=`${p.x*100}%`;m.style.top=`${p.y*100}%`}}
+function clearAll(){points={a:null,b:null};samples={a:null,b:null};active='a';sampleA.classList.add('active');sampleB.classList.remove('active');labelA.textContent='未取样';labelB.textContent='未取样';swatchA.style.background='#20211f';swatchB.style.background='#20211f';answer.hidden=true;step.textContent='先点第一处';positionMarkers()}
+function loadFile(file){if(!file||!file.type.startsWith('image/')){setError('请选择一张照片。');return}setError('');if(url)URL.revokeObjectURL(url);url=URL.createObjectURL(file);photo.onload=()=>{imgW=photo.naturalWidth;imgH=photo.naturalHeight;const max=2000,scale=Math.min(1,max/Math.max(imgW,imgH));canvas.width=Math.max(1,Math.round(imgW*scale));canvas.height=Math.max(1,Math.round(imgH*scale));ctx.drawImage(photo,0,0,canvas.width,canvas.height);home.hidden=true;compare.hidden=false;clearAll();requestAnimationFrame(fitStage)};photo.onerror=()=>setError('这张照片没有成功打开。');photo.src=url}
+function patchAt(p){const x=Math.round(p.x*canvas.width),y=Math.round(p.y*canvas.height),r=Math.max(4,Math.round(Math.min(canvas.width,canvas.height)*.009));const x0=clamp(x-r,0,canvas.width-1),y0=clamp(y-r,0,canvas.height-1),x1=clamp(x+r,1,canvas.width),y1=clamp(y+r,1,canvas.height),data=ctx.getImageData(x0,y0,x1-x0,y1-y0).data;const rs=[],gs=[],bs=[],ys=[];for(let i=0;i<data.length;i+=16){const R=data[i],G=data[i+1],B=data[i+2],A=data[i+3];if(A<220)continue;rs.push(R);gs.push(G);bs.push(B);ys.push(.2126*R+.7152*G+.0722*B)}const r0=median(rs),g0=median(gs),b0=median(bs),ym=median(ys);let sum=0;for(const v of ys)sum+=(v-ym)*(v-ym);const spread=Math.sqrt(sum/Math.max(1,ys.length));return{rgb:[r0,g0,b0],lab:rgbToLab(r0,g0,b0),spread,luma:ym,count:rs.length}}
+function rgbText(s){return`rgb(${Math.round(s.rgb[0])}, ${Math.round(s.rgb[1])}, ${Math.round(s.rgb[2])})`}
+function samplePoint(k){const p=points[k];if(!p)return;samples[k]=patchAt(p);const sw=k==='a'?swatchA:swatchB,label=k==='a'?labelA:labelB;sw.style.background=`rgb(${samples[k].rgb.join(',')})`;label.textContent=rgbText(samples[k])}
+function directionText(a,b){const dL=b.lab.L-a.lab.L,da=b.lab.a-a.lab.a,db=b.lab.b-a.lab.b,parts=[];if(Math.abs(db)>1.25)parts.push(`B ${db>0?'更黄':'更蓝'}一点`);if(Math.abs(da)>1.25)parts.push(`B ${da>0?'更红':'更绿'}一点`);if(Math.abs(dL)>1.8)parts.push(`B ${dL>0?'更亮':'更暗'}一点`);return parts.slice(0,2).join(' · ')||'主要差别很小，肉眼未必稳定看得出来。'}
+function verdictFor(d){if(d<1.2)return'基本一个色';if(d<2.4)return'非常接近';if(d<5)return'不是一个色';return'明显不是'}
+function renderAnswer(){const a=samples.a,b=samples.b;if(!a||!b){answer.hidden=true;return}const d=deltaE00(a.lab,b.lab);answer.hidden=false;verdict.textContent=verdictFor(d);deltaEl.textContent=`ΔE00 ${d.toFixed(1)}`;difference.textContent=directionText(a,b);const issues=[];if(a.spread>18||b.spread>18)issues.push('采样位置纹理、反光或阴影变化比较大');if(a.luma<20||b.luma<20)issues.push('有一处太暗');if(a.luma>242||b.luma>242)issues.push('有一处接近过曝');quality.textContent=issues.length?`${issues.join('；')}。换到更平整的位置再点一次会更稳。`:'两个采样区相对平整，可以作为这张照片里的颜色比较。';step.textContent='点 A 或 B 可以重选其中一处'}
+function setActive(k){active=k;sampleA.classList.toggle('active',k==='a');sampleB.classList.toggle('active',k==='b');step.textContent=points[k]?`重新点 ${k.toUpperCase()} 的位置`:`点 ${k.toUpperCase()} 的位置`}
+function place(k,x,y){points[k]={x:clamp(x,0,1),y:clamp(y,0,1)};samplePoint(k);positionMarkers();if(!points.b&&k==='a')setActive('b');else if(points.a&&points.b)renderAnswer();else step.textContent='再点一下第二处'}
+stage.addEventListener('pointerdown',e=>{if(e.target===markerA||e.target===markerB)return;const r=stage.getBoundingClientRect();place(active,(e.clientX-r.left)/r.width,(e.clientY-r.top)/r.height)});
+markerA.onclick=e=>{e.stopPropagation();setActive('a')};markerB.onclick=e=>{e.stopPropagation();setActive('b')};sampleA.onclick=()=>setActive('a');sampleB.onclick=()=>setActive('b');
+shoot.onclick=()=>cameraInput.click();choose.onclick=()=>fileInput.click();cameraInput.onchange=()=>{loadFile(cameraInput.files?.[0]);cameraInput.value=''};fileInput.onchange=()=>{loadFile(fileInput.files?.[0]);fileInput.value=''};
+back.onclick=()=>{compare.hidden=true;home.hidden=false;if(url){URL.revokeObjectURL(url);url=''}photo.removeAttribute('src');clearAll();window.scrollTo({top:0,behavior:'instant'})};replace.onclick=()=>cameraInput.click();reset.onclick=clearAll;window.addEventListener('resize',()=>requestAnimationFrame(fitStage));window.addEventListener('pagehide',()=>{if(url)URL.revokeObjectURL(url)});
+})();
