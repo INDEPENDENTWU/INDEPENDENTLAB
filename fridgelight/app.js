@@ -6,91 +6,36 @@ const running=$('#running'),runSmall=$('#runSmall'),runTitle=$('#runTitle'),runH
 const result=$('#result'),resultBack=$('#resultBack'),again=$('#again'),verdict=$('#verdict'),resultText=$('#resultText'),lowValue=$('#lowValue'),returnValue=$('#returnValue'),chart=$('#chart'),copyResult=$('#copyResult'),resultNote=$('#resultNote');
 const sample=$('#sample'),ctx=sample.getContext('2d',{willReadFrequently:true}),chartCtx=chart.getContext('2d');
 let stream=null,raf=0,lastSampleAt=0,mode='idle',wake=null,lastOutcome=null;
-let cal=[],baseline=0,baselineBright=0,referenceGrid=null,timeline=[],testStarted=0;
-let darkSince=0,darkAt=0,darkReadyAt=0,recoverSince=0,minBrightness=255,minBright=255,maxAfterDark=0,bestScene=0,tooFastCount=0;
+let openFrames=[],openRef=null,baseline=0,testStarted=0,timeline=[],candidate=null,closedAt=0,recoverSince=0,closedStats=[];
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const median=a=>{if(!a.length)return 0;const s=[...a].sort((x,y)=>x-y),m=s.length>>1;return s.length%2?s[m]:(s[m-1]+s[m])/2};
-const mad=(a,m=median(a))=>median(a.map(v=>Math.abs(v-m)));
+const percentile=(a,p)=>{if(!a.length)return 0;const s=[...a].sort((x,y)=>x-y);return s[Math.min(s.length-1,Math.max(0,Math.round((s.length-1)*p)))]};
 function setError(t=''){error.hidden=!t;error.textContent=t}
 async function requestWake(){if(wake||!navigator.wakeLock?.request)return;try{wake=await navigator.wakeLock.request('screen');wake.addEventListener?.('release',()=>wake=null,{once:true})}catch{}}
 async function releaseWake(){const w=wake;wake=null;if(w)try{await w.release()}catch{}}
-async function openCamera(){setError('');stopCamera();try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720},frameRate:{ideal:30}},audio:false});video.srcObject=stream;await video.play();home.hidden=true;result.hidden=true;running.hidden=true;setup.hidden=false;readyText.textContent='镜头对着冰箱内部和灯，手机放稳后开始。';mode='preview'}catch(e){console.error(e);setError('没有打开后置相机。请允许相机权限后再试。')}}
-function stopCamera(){cancelAnimationFrame(raf);raf=0;if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}video.srcObject=null;mode='idle'}
-function frameStats(){
- if(video.readyState<2)return null;
- ctx.drawImage(video,0,0,sample.width,sample.height);
- const d=ctx.getImageData(0,0,sample.width,sample.height).data;
- const cols=8,rows=6,cw=sample.width/cols,ch=sample.height/rows,grid=[];
- for(let gy=0;gy<rows;gy++)for(let gx=0;gx<cols;gx++){
-   let sum=0,n=0;
-   const x0=Math.floor(gx*cw)+1,x1=Math.floor((gx+1)*cw)-1,y0=Math.floor(gy*ch)+1,y1=Math.floor((gy+1)*ch)-1;
-   for(let y=y0;y<y1;y+=2)for(let x=x0;x<x1;x+=2){const i=(y*sample.width+x)*4;sum+=.2126*d[i]+.7152*d[i+1]+.0722*d[i+2];n++}
-   grid.push(n?sum/n:0);
- }
- const ordered=[...grid].sort((a,b)=>a-b),brightness=median(grid),top=ordered.slice(Math.floor(ordered.length*.72)),bright=median(top);
- return{brightness,bright,grid};
-}
-function averageGrid(frames){if(!frames.length)return null;const n=frames[0].grid.length,out=new Array(n).fill(0);for(const f of frames)for(let i=0;i<n;i++)out[i]+=f.grid[i];for(let i=0;i<n;i++)out[i]/=frames.length;return out}
-function sceneScore(grid){if(!referenceGrid||!grid?.length)return 0;const diffs=[];for(let i=0;i<grid.length;i++)diffs.push(Math.abs(grid[i]-referenceGrid[i]));const d=median(diffs);return clamp(1-d/Math.max(24,baseline*.48),0,1)}
-function darkCoverage(grid){if(!referenceGrid||!grid?.length)return 0;let n=0,hit=0;for(let i=0;i<grid.length;i++){const ref=referenceGrid[i];if(ref<18)continue;n++;if(grid[i]<Math.max(10,ref*.64))hit++}return n?hit/n:0}
+async function openCamera(){setError('');stopCamera();try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720},frameRate:{ideal:30}},audio:false});video.srcObject=stream;await video.play();home.hidden=true;result.hidden=true;running.hidden=true;setup.hidden=false;readyText.textContent='镜头能同时看到冰箱内部和灯光就可以。';mode='preview'}catch(e){console.error(e);setError('没有打开后置相机。请允许相机权限后再试。')}}
+function stopCamera(){cancelAnimationFrame(raf);raf=0;if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}video.srcObject=null;if(mode!=='done')mode='idle'}
+function frameStats(){if(video.readyState<2)return null;ctx.drawImage(video,0,0,sample.width,sample.height);const d=ctx.getImageData(0,0,sample.width,sample.height).data,vals=[];let dark=0,bright=0;for(let y=3;y<sample.height-3;y++){for(let x=3;x<sample.width-3;x++){const i=(y*sample.width+x)*4,v=.2126*d[i]+.7152*d[i+1]+.0722*d[i+2];vals.push(v);if(v<24)dark++;if(v>232)bright++}}const med=median(vals),p10=percentile(vals,.1),p90=percentile(vals,.9),cells=[];const cols=12,rows=8,cw=sample.width/cols,ch=sample.height/rows;for(let cy=0;cy<rows;cy++){for(let cx=0;cx<cols;cx++){let sum=0,n=0;const x0=Math.floor(cx*cw),x1=Math.floor((cx+1)*cw),y0=Math.floor(cy*ch),y1=Math.floor((cy+1)*ch);for(let y=y0;y<y1;y+=2){for(let x=x0;x<x1;x+=2){const i=(y*sample.width+x)*4;sum+=.2126*d[i]+.7152*d[i+1]+.0722*d[i+2];n++}}cells.push(clamp((sum/Math.max(1,n))/Math.max(18,med),0,2.4))}}let texture=0;for(let i=1;i<cells.length;i++)texture+=Math.abs(cells[i]-cells[i-1]);texture/=Math.max(1,cells.length-1);return{v:med,p10,p90,dark:dark/vals.length,bright:bright/vals.length,fp:cells,texture}}
+function fpDistance(a,b){if(!a?.length||!b?.length||a.length!==b.length)return 1;let s=0;for(let i=0;i<a.length;i++)s+=Math.abs(a[i]-b[i]);return s/a.length}
+function averageFp(frames){if(!frames.length)return null;const n=frames[0].fp.length,out=new Array(n).fill(0);for(const f of frames)for(let i=0;i<n;i++)out[i]+=f.fp[i];return out.map(v=>v/frames.length)}
 function setPulse(v){const pct=baseline?clamp(v/baseline*100,0,120):0;pulse.firstElementChild.style.width=`${Math.min(100,pct)}%`}
 function setRun(small,title,hint){runSmall.textContent=small;runTitle.textContent=title;runHint.textContent=hint}
-function startSampling(){cancelAnimationFrame(raf);lastSampleAt=0;const loop=now=>{raf=requestAnimationFrame(loop);if(now-lastSampleAt<72)return;lastSampleAt=now;const f=frameStats();if(f)handleFrame(now,f)};raf=requestAnimationFrame(loop)}
-function resetCloseAttempt(){darkSince=0;darkAt=0;darkReadyAt=0;recoverSince=0;bestScene=0;maxAfterDark=0;mode='waitClose'}
-function handleCalibration(now,f){
- cal.push(f);if(cal.length>48)cal.shift();
- if(cal.length<18)return;
- const recent=cal.slice(-16),vals=recent.map(x=>x.brightness),brights=recent.map(x=>x.bright),m=median(vals),bm=median(brights),noise=mad(vals,m),brightNoise=mad(brights,bm);
- const stable=(noise<Math.max(4,m*.055))&&(brightNoise<Math.max(6,bm*.065));
- if(stable){baseline=m;baselineBright=bm;referenceGrid=averageGrid(recent.slice(-10));timeline=[];testStarted=performance.now();minBrightness=baseline;minBright=baselineBright;tooFastCount=0;resetCloseAttempt();setRun('现在','关门','关上后保持一会儿，再打开门。');return}
- if(cal.length>=44){mode='preview';running.hidden=true;setup.hidden=false;readyText.textContent='画面一直在变。把手机放稳、镜头对着冰箱内部，再开始。';releaseWake()}
-}
-function handleFrame(now,f){
- if(mode==='calibrating'){handleCalibration(now,f);return}
- if(!['waitClose','darkHold','waitOpen'].includes(mode))return;
- const t=performance.now()-testStarted;timeline.push({t,v:f.brightness});if(timeline.length>520)timeline.shift();minBrightness=Math.min(minBrightness,f.brightness);minBright=Math.min(minBright,f.bright);setPulse(f.brightness);
- const ratio=f.brightness/Math.max(1,baseline),brightRatio=f.bright/Math.max(1,baselineBright),coverage=darkCoverage(f.grid),looksDark=(brightRatio<.56)||(ratio<.62&&brightRatio<.70)||(coverage>.64&&brightRatio<.76);
- if(mode==='waitClose'){
-   if(t<850){darkSince=0;return}
-   if(looksDark){if(!darkSince)darkSince=now;if(now-darkSince>=680){darkAt=now;mode='darkHold';setRun('已经变暗','保持关门','再保持一会儿。')}}else darkSince=0;
-   if(t>26000)finish(false,'no-close');
-   return;
- }
- if(mode==='darkHold'){
-   if(!looksDark){tooFastCount++;resetCloseAttempt();setRun('刚才太快','再关一次','关上约 2 秒，再打开门。');return}
-   if(now-darkAt>=1250){darkReadyAt=now;mode='waitOpen';setRun('关门成立','再打开门','打开后先别拿走手机。')}
-   return;
- }
- if(mode==='waitOpen'){
-   if(looksDark){recoverSince=0;return}
-   maxAfterDark=Math.max(maxAfterDark,f.brightness);bestScene=Math.max(bestScene,sceneScore(f.grid));
-   const riseFromLow=f.brightness-Math.min(minBrightness,baseline),recovered=f.brightness>baseline*.69&&f.bright>baselineBright*.65&&riseFromLow>Math.max(28,baseline*.28);
-   if(recovered){if(!recoverSince)recoverSince=now;if(now-recoverSince>=360){
-     const total=performance.now()-testStarted,darkDuration=now-darkAt;
-     if(total<2600||darkDuration<1250){resetCloseAttempt();setRun('刚才太快','再关一次','关上约 2 秒，再打开门。');return}
-     if(bestScene<.20){finish(false,'scene-moved');return}
-     finish(true,'cycle');
-   }}else recoverSince=0;
-   if(now-darkAt>42000)finish(false,'no-open');
- }
-}
-async function beginTest(){if(!stream)return;cal=[];baseline=0;baselineBright=0;referenceGrid=null;timeline=[];mode='calibrating';setup.hidden=true;running.hidden=false;setRun('准备','放稳手机','正在确认开门时的稳定画面。');pulse.firstElementChild.style.width='0';pulse.firstElementChild.style.background='#f5c928';await requestWake();startSampling()}
+function startSampling(){cancelAnimationFrame(raf);lastSampleAt=0;const loop=now=>{raf=requestAnimationFrame(loop);if(now-lastSampleAt<70)return;lastSampleAt=now;const s=frameStats();if(s)handleFrame(now,s)};raf=requestAnimationFrame(loop)}
+function resetCloseCandidate(){candidate=null;closedStats=[]}
+function beginCloseCandidate(now,s,diff){candidate={start:now,settledFrom:0,closedFp:null,stable:[],minRatio:s.v/Math.max(1,baseline),maxDiff:diff};closedStats=[];mode='confirmClose';setRun('正在确认','保持关门','手机先别动。')}
+function closeCandidateFrame(now,s){const c=candidate;if(!c)return;const ratio=s.v/Math.max(1,baseline),diff=fpDistance(s.fp,openRef);c.minRatio=Math.min(c.minRatio,ratio);c.maxDiff=Math.max(c.maxDiff,diff);if(now-c.start<420)return;if(!c.closedFp){c.closedFp=s.fp;c.settledFrom=now;closedStats=[s];return}const closedMove=fpDistance(s.fp,c.closedFp);c.stable.push(closedMove);closedStats.push(s);if(closedStats.length>32)closedStats.shift();if(closedMove>.34){c.closedFp=s.fp;c.settledFrom=now;c.stable=[];closedStats=[s];runHint.textContent='画面还在动，放稳后继续。';return}const stableFor=now-c.settledFrom,stableScore=median(c.stable.slice(-12)),deepDark=c.minRatio<.57,changedScene=c.maxDiff>.20;if(stableFor>=1550&&stableScore<.19&&(deepDark||changedScene)){mode='waitOpen';closedAt=now;recoverSince=0;setRun('关门状态已确认','再打开门','打开后停一下再拿手机。');pulse.firstElementChild.style.background='#98cf56';return}if(now-c.start>5600){mode='waitClose';resetCloseCandidate();setRun('还没确认','再关一次','关上后保持约 2 秒。')}}
+function openMatch(s){const ratio=s.v/Math.max(1,baseline),diff=fpDistance(s.fp,openRef),brightnessOk=ratio>.64&&ratio<1.55,sceneOk=diff<(s.texture<.055?.24:.18);return brightnessOk&&sceneOk}
+function handleFrame(now,s){if(mode==='calibrating'){openFrames.push(s);if(openFrames.length>36)openFrames.shift();if(openFrames.length<20)return;const recent=openFrames.slice(-16),vs=recent.map(x=>x.v),med=median(vs),spread=(percentile(vs,.9)-percentile(vs,.1))/Math.max(1,med);if(med<30){setRun('画面太暗','先开着门','镜头朝向冰箱内部和灯。');return}if(spread>.18){setRun('先别关门','放稳手机','正在记住开门时的画面。');return}baseline=med;openRef=averageFp(recent.slice(-10));mode='waitClose';testStarted=now;timeline=[];resetCloseCandidate();setRun('开门画面已记住','关门','关上后保持至少 2 秒。');return}
+ if(!['waitClose','confirmClose','waitOpen'].includes(mode))return;const t=now-testStarted;timeline.push({t,v:s.v});if(timeline.length>900)timeline.shift();setPulse(s.v);const ratio=s.v/Math.max(1,baseline),diff=fpDistance(s.fp,openRef);
+ if(mode==='waitClose'){const deepDrop=ratio<.62||(baseline-s.v>55&&ratio<.74),sceneShift=diff>.24;if((deepDrop||sceneShift)&&t>350){beginCloseCandidate(now,s,diff);return}if(t>45000)finish('invalid','没有确认到一次完整的关门过程。')}
+ else if(mode==='confirmClose')closeCandidateFrame(now,s);
+ else if(mode==='waitOpen'){closedStats.push(s);if(closedStats.length>70)closedStats.shift();if(now-closedAt<650)return;if(openMatch(s)){if(!recoverSince)recoverSince=now;if(now-recoverSince>=560)finish(classifyClosed(),'cycle')}else recoverSince=0;if(now-closedAt>60000)finish('invalid','门关上以后一直没有重新看到开门时的画面。')}}
+function classifyClosed(){const useful=closedStats.slice(0,Math.max(1,closedStats.length-8)),vals=useful.map(x=>x.v),closedMedian=median(vals.length?vals:[baseline]),ratio=closedMedian/Math.max(1,baseline),minRatio=candidate?.minRatio??ratio,changed=(candidate?.maxDiff??0)>.20;if(minRatio<.50||ratio<.58||(baseline-closedMedian>60&&ratio<.70))return'off';if(changed&&ratio>.80)return'on';return'uncertain'}
+async function beginTest(){if(!stream)return;openFrames=[];openRef=null;baseline=0;timeline=[];candidate=null;closedStats=[];closedAt=0;recoverSince=0;lastOutcome=null;mode='calibrating';setup.hidden=true;running.hidden=false;setRun('先保持门开着','放稳手机','正在记住现在的亮度和画面。');pulse.firstElementChild.style.width='0';pulse.firstElementChild.style.background='#f5c928';await requestWake();startSampling()}
 function drawChart(){const w=chart.width,h=chart.height;chartCtx.clearRect(0,0,w,h);chartCtx.fillStyle='#111';chartCtx.fillRect(0,0,w,h);if(timeline.length<2)return;const maxT=Math.max(...timeline.map(x=>x.t),1),maxV=Math.max(baseline,...timeline.map(x=>x.v),1);chartCtx.strokeStyle='#30322e';chartCtx.lineWidth=1;const by=h-(baseline/maxV)*(h-26)-12;chartCtx.beginPath();chartCtx.moveTo(0,by);chartCtx.lineTo(w,by);chartCtx.stroke();chartCtx.strokeStyle='#f5c928';chartCtx.lineWidth=3;chartCtx.lineJoin='round';chartCtx.beginPath();timeline.forEach((p,i)=>{const x=p.t/maxT*w,y=h-(p.v/maxV)*(h-26)-12;i?chartCtx.lineTo(x,y):chartCtx.moveTo(x,y)});chartCtx.stroke()}
-function outcomeCopy(){if(!lastOutcome)return'';return['灯灭了吗',`结果：${verdict.textContent}`,`关门最低亮度：${lowValue.textContent}`,lastOutcome.ok?`再开门亮度：${returnValue.textContent}`:'',resultText.textContent].filter(Boolean).join('\n')}
-async function finish(ok,reason){
- if(!['waitClose','darkHold','waitOpen'].includes(mode))return;mode='done';cancelAnimationFrame(raf);raf=0;
- const lowRatio=baseline?clamp(minBrightness/baseline,0,2):0,returnRatio=baseline?clamp((maxAfterDark||timeline[timeline.length-1]?.v||0)/baseline,0,2):0;
- lastOutcome={ok,reason,lowRatio,returnRatio,baseline,minBrightness,bestScene,tooFastCount};running.hidden=true;result.hidden=false;setup.hidden=true;
- if(ok){verdict.textContent='灭了';resultText.textContent='关门后持续变暗，重新开门后又回到接近开始时的画面。';resultNote.textContent='这次记录到完整的开门 → 关门变暗 → 再开门恢复。'}
- else if(reason==='scene-moved'){verdict.textContent='没测完整';resultText.textContent='画面重新变亮了，但和开始时差得太多。';resultNote.textContent='手机可能移动了。放稳后再测一次。'}
- else if(reason==='no-open'){verdict.textContent='没测完整';resultText.textContent='已经记录到持续变暗，但没有记录到重新开门后的恢复。';resultNote.textContent='重新测试时，关门后再打开门并停一下。'}
- else{verdict.textContent='没测完整';resultText.textContent='没有记录到一次完整、持续的关门变暗过程。';resultNote.textContent='镜头对着冰箱内部，手机放稳，关门约 2 秒再打开。'}
- lowValue.textContent=baseline?`${Math.round(lowRatio*100)}%`:'—';returnValue.textContent=ok?`${Math.round(returnRatio*100)}%`:'—';drawChart();stopCamera();await releaseWake();copyResult.textContent='复制结果'
-}
+async function finish(outcome,reason){if(!['waitClose','confirmClose','waitOpen'].includes(mode))return;mode='done';cancelAnimationFrame(raf);raf=0;const vals=closedStats.map(x=>x.v),closedMedian=median(vals.length?vals:[baseline]),closedRatio=baseline?clamp(closedMedian/baseline,0,2):0,lastV=timeline[timeline.length-1]?.v||0,returnRatio=baseline?clamp(lastV/baseline,0,2):0;lastOutcome={outcome,reason,closedRatio,returnRatio,baseline};running.hidden=true;result.hidden=false;setup.hidden=true;if(outcome==='off'){verdict.textContent='灭了';resultText.textContent='关门状态稳定后明显变暗，再开门后回到了原来的画面。';resultNote.textContent='这次记录到完整的开门 → 关门 → 再开门。'}else if(outcome==='on'){verdict.textContent='没灭';resultText.textContent='关门状态已经稳定，但亮度仍接近开门时。';resultNote.textContent='这次关门状态和重新开门都已确认。'}else if(outcome==='uncertain'){verdict.textContent='看不准';resultText.textContent='关门状态确认到了，但亮度变化落在中间区域。';resultNote.textContent='换一个能同时看到冰箱内部和灯的位置再测一次。'}else{verdict.textContent='这次没测成';resultText.textContent=reason;resultNote.textContent='放稳手机，再完成一次开门 → 关门 → 再开门。'}lowValue.textContent=outcome==='invalid'?'—':`${Math.round(closedRatio*100)}%`;returnValue.textContent=outcome==='invalid'?'—':`${Math.round(returnRatio*100)}%`;drawChart();stopCamera();await releaseWake();copyResult.textContent='复制结果'}
 async function copyText(t){try{await navigator.clipboard.writeText(t);return true}catch{}try{const ta=document.createElement('textarea');ta.value=t;ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);ta.select();const ok=document.execCommand('copy');ta.remove();return ok}catch{return false}}
-async function copyOutcome(){const text=outcomeCopy();if(!text)return;const ok=await copyText(text);copyResult.textContent=ok?'已复制':'复制失败';setTimeout(()=>copyResult.textContent='复制结果',900)}
+async function copyOutcome(){if(!lastOutcome)return;const text=['灯灭了吗',`结果：${verdict.textContent}`,`关门期间亮度：${lowValue.textContent}`,`再开门亮度：${returnValue.textContent}`,resultText.textContent].filter(Boolean).join('\n');const ok=await copyText(text);copyResult.textContent=ok?'已复制':'复制失败';setTimeout(()=>copyResult.textContent='复制结果',900)}
 function goHome(){stopCamera();releaseWake();setup.hidden=true;running.hidden=true;result.hidden=true;home.hidden=false;lastOutcome=null;window.scrollTo({top:0,behavior:'instant'})}
-start.onclick=openCamera;exitSetup.onclick=goHome;test.onclick=beginTest;cancelRun.onclick=goHome;resultBack.onclick=goHome;again.onclick=openCamera;copyResult.onclick=copyOutcome;
-document.addEventListener('visibilitychange',()=>{if(document.hidden&&['calibrating','waitClose','darkHold','waitOpen'].includes(mode)){cancelAnimationFrame(raf);raf=0}else if(!document.hidden&&stream&&['calibrating','waitClose','darkHold','waitOpen'].includes(mode))startSampling()});
-window.addEventListener('pagehide',()=>{stopCamera();releaseWake()});
+start.onclick=openCamera;exitSetup.onclick=goHome;test.onclick=beginTest;cancelRun.onclick=goHome;resultBack.onclick=goHome;again.onclick=openCamera;copyResult.onclick=copyOutcome;document.addEventListener('visibilitychange',()=>{if(document.hidden&&['calibrating','waitClose','confirmClose','waitOpen'].includes(mode)){cancelAnimationFrame(raf);raf=0}else if(!document.hidden&&stream&&['calibrating','waitClose','confirmClose','waitOpen'].includes(mode))startSampling()});window.addEventListener('pagehide',()=>{stopCamera();releaseWake()});
 })();
