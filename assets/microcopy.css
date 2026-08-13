@@ -1,0 +1,5 @@
+/* INDEPENDENT / supporting text system */
+small{font-size:13.5px!important;line-height:1.55!important;letter-spacing:0!important}
+.note,.privacy,.local-note,.source-note,.method,.result-note,.command-note,.hold-hint,.camera-hint,.review-copy,.line-note,.with-langs,.file-entry small,.saved-reference small,.intro>small,.intro small.note,.result-body>small,.result small.note,.setup-copy p,.run-state p{font-size:14.5px!important;line-height:1.62!important;font-weight:500}
+.copy p,.intro-copy p,.product-desc{max-width:680px}
+@media(max-width:540px){small{font-size:13.5px!important}.note,.privacy,.local-note,.source-note,.method,.result-note,.command-note,.hold-hint,.camera-hint,.review-copy,.line-note,.with-langs,.file-entry small,.saved-reference small,.intro>small,.result-body>small,.result small.note,.setup-copy p,.run-state p{font-size:14px!important}}
