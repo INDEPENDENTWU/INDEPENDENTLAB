@@ -1,0 +1,33 @@
+(()=>{
+'use strict';
+const $=s=>document.querySelector(s);
+const home=$('#home'),optionA=$('#optionA'),optionB=$('#optionB'),start=$('#start'),error=$('#error');
+const duel=$('#duel'),exit=$('#exit'),restartTop=$('#restartTop'),players=$('#players'),duelState=$('#duelState'),duelTime=$('#duelTime');
+const result=$('#result'),resultBack=$('#resultBack'),again=$('#again'),againMain=$('#againMain'),change=$('#change'),resultLabel=$('#resultLabel'),winner=$('#winner'),reason=$('#reason'),duration=$('#duration');
+const labels={a:[],b:[]};
+for(const el of [$('#topA'),$('#bottomA')])labels.a.push(el);for(const el of [$('#topB'),$('#bottomB')])labels.b.push(el);
+let options={a:'出去吃',b:'在家做'},touches=new Map(),playerTouch={top:null,bottom:null},armed=false,armedAt=0,raf=0,consensusTimer=0,finished=false;
+function setError(t=''){error.hidden=!t;error.textContent=t}
+function clean(s){return String(s||'').replace(/\s+/g,' ').trim().slice(0,18)}
+function writeLabels(){for(const k of ['a','b'])for(const el of labels[k])el.textContent=options[k]}
+function save(){try{localStorage.setItem('letgo-options',JSON.stringify(options))}catch{}}
+function restore(){try{const x=JSON.parse(localStorage.getItem('letgo-options')||'null');if(x?.a&&x?.b){optionA.value=x.a;optionB.value=x.b}}catch{}}
+function clearVisual(){document.querySelectorAll('.choice.held').forEach(x=>x.classList.remove('held'));duel.classList.remove('active');duelState.textContent='两边各按住一个';duelTime.textContent='00.0';cancelAnimationFrame(raf);raf=0;clearTimeout(consensusTimer);consensusTimer=0}
+function resetRound(){touches.clear();playerTouch={top:null,bottom:null};armed=false;armedAt=0;finished=false;clearVisual()}
+function begin(){const a=clean(optionA.value),b=clean(optionB.value);if(!a||!b){setError('两个选项都要写。');return}if(a===b){setError('两个选项需要不一样。');return}setError('');options={a,b};save();writeLabels();home.hidden=true;result.hidden=true;duel.hidden=false;resetRound()}
+function quit(){resetRound();duel.hidden=true;result.hidden=true;home.hidden=false;window.scrollTo({top:0,behavior:'instant'})}
+function choiceAt(x,y){const el=document.elementFromPoint(x,y)?.closest?.('.choice');if(!el||!duel.contains(el))return null;const player=el.closest('.player')?.dataset.player,option=el.dataset.option;if(!player||!option)return null;return{el,player,option}}
+function activePair(){const top=playerTouch.top!=null?touches.get(playerTouch.top):null,bottom=playerTouch.bottom!=null?touches.get(playerTouch.bottom):null;return top&&bottom?{top,bottom}:null}
+function tick(now){if(!armed||finished)return;duelTime.textContent=((now-armedAt)/1000).toFixed(1).padStart(4,'0');raf=requestAnimationFrame(tick)}
+function armIfReady(){if(finished)return;const pair=activePair();if(!pair){duel.classList.remove('active');duelState.textContent=playerTouch.top!=null||playerTouch.bottom!=null?'等另一边':'两边各按住一个';return}duel.classList.add('active');if(pair.top.option===pair.bottom.option){duelState.textContent='你们选了一样';clearTimeout(consensusTimer);consensusTimer=setTimeout(()=>finishConsensus(pair.top.option),260);return}clearTimeout(consensusTimer);consensusTimer=0;if(!armed){armed=true;armedAt=performance.now();duelState.textContent='谁先松手，谁让一步';raf=requestAnimationFrame(tick)}}
+function finishConsensus(option){if(finished)return;const pair=activePair();if(!pair||pair.top.option!==option||pair.bottom.option!==option)return;finished=true;showResult(option,true,0)}
+function showResult(option,consensus,ms,loser=null){clearVisual();duel.hidden=true;result.hidden=false;winner.textContent=options[option];duration.textContent=consensus?'不用僵持':`${(ms/1000).toFixed(1)} 秒`;resultLabel.textContent=consensus?'一致':'结论';reason.textContent=consensus?'两个人选择相同，不需要继续裁决。':`${loser?options[loser]:'另一边'}先松手，这一轮让一步。`;window.scrollTo({top:0,behavior:'instant'})}
+function showTie(ms){clearVisual();duel.hidden=true;result.hidden=false;winner.textContent='这轮不算';duration.textContent=`${(ms/1000).toFixed(1)} 秒`;resultLabel.textContent='同时松手';reason.textContent='两边在同一次触摸结束里松开，没有人让步。';window.scrollTo({top:0,behavior:'instant'})}
+function releaseTouch(id,cancelled=false){const info=touches.get(id);if(!info)return;touches.delete(id);info.el.classList.remove('held');if(playerTouch[info.player]===id)playerTouch[info.player]=null;if(finished)return;if(cancelled){armed=false;armedAt=0;clearVisual();armIfReady();return}const pairBeforeRelease=info.pairSnapshot;if(armed&&pairBeforeRelease&&pairBeforeRelease.top&&pairBeforeRelease.bottom&&pairBeforeRelease.top.option!==pairBeforeRelease.bottom.option){const remaining=info.player==='top'?pairBeforeRelease.bottom:pairBeforeRelease.top;const elapsed=performance.now()-armedAt;if(elapsed>=150){finished=true;showResult(remaining.option,false,elapsed,info.option);return}}if(!activePair()){armed=false;armedAt=0;cancelAnimationFrame(raf);raf=0;duelTime.textContent='00.0'}armIfReady()}
+function onTouchStart(e){e.preventDefault();if(finished)return;for(const t of e.changedTouches){const hit=choiceAt(t.clientX,t.clientY);if(!hit||playerTouch[hit.player]!=null)continue;const info={id:t.identifier,...hit,pairSnapshot:null};touches.set(t.identifier,info);playerTouch[hit.player]=t.identifier;hit.el.classList.add('held')}const pair=activePair();if(pair){pair.top.pairSnapshot={top:{...pair.top},bottom:{...pair.bottom}};pair.bottom.pairSnapshot=pair.top.pairSnapshot}armIfReady()}
+function onTouchEnd(e){e.preventDefault();const pair=activePair();if(pair){pair.top.pairSnapshot={top:{...pair.top},bottom:{...pair.bottom}};pair.bottom.pairSnapshot=pair.top.pairSnapshot}const ending=new Set([...e.changedTouches].map(t=>t.identifier));if(armed&&pair&&ending.has(playerTouch.top)&&ending.has(playerTouch.bottom)){const elapsed=performance.now()-armedAt;if(elapsed>=150){finished=true;touches.clear();playerTouch={top:null,bottom:null};showTie(elapsed);return}}for(const t of e.changedTouches)releaseTouch(t.identifier,false)}
+function onTouchCancel(e){e.preventDefault();for(const t of e.changedTouches)releaseTouch(t.identifier,true)}
+players.addEventListener('touchstart',onTouchStart,{passive:false});players.addEventListener('touchend',onTouchEnd,{passive:false});players.addEventListener('touchcancel',onTouchCancel,{passive:false});players.addEventListener('touchmove',e=>e.preventDefault(),{passive:false});
+start.onclick=begin;exit.onclick=quit;restartTop.onclick=resetRound;resultBack.onclick=quit;again.onclick=()=>{result.hidden=true;duel.hidden=false;resetRound()};againMain.onclick=again.onclick;change.onclick=quit;
+window.addEventListener('pagehide',resetRound);document.addEventListener('visibilitychange',()=>{if(document.hidden&&!duel.hidden)resetRound()});restore();
+})();
