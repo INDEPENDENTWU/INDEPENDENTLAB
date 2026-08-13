@@ -1,0 +1,1 @@
+window.EGG_CAMERA={async open(video){const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:960},frameRate:{ideal:30,min:20}},audio:false});video.srcObject=stream;await video.play();return stream},stop(video,stream){if(stream)stream.getTracks().forEach(t=>t.stop());video.srcObject=null}};
