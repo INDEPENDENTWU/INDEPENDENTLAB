@@ -1,6 +1,6 @@
 (()=>{
 'use strict';
-const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+const $=s=>document.querySelector(s);
 const home=$('#home'),choose=$('#choose'),filesInput=$('#files'),pasteOpen=$('#pasteOpen'),error=$('#error');
 const pasteSheet=$('#pasteSheet'),pasteClose=$('#pasteClose'),pasteText=$('#pasteText'),pasteUse=$('#pasteUse'),pasteModes=$('#pasteModes');
 const reader=$('#reader'),exit=$('#exit'),stage=$('#stage'),pdfCanvas=$('#pdfCanvas'),imagePage=$('#imagePage'),textPage=$('#textPage'),textBody=$('#textBody'),stepNo=$('#stepNo'),measureText=$('#measureText'),loading=$('#loading'),loadingNote=$('#loadingNote'),pctx=pdfCanvas.getContext('2d',{alpha:false});
@@ -20,7 +20,7 @@ let videoStream=null,faceLandmarker=null,faceLoop=0,faceLast=0,faceSeenUntil=0,c
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const median=a=>{if(!a.length)return 0;const s=[...a].sort((x,y)=>x-y),m=s.length>>1;return s.length%2?s[m]:(s[m-1]+s[m])/2};
-const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot',"'":'&#39;'}[c]));
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const SpeechRecognition=window.SpeechRecognition||window.webkitSpeechRecognition;
 
 const DEFAULT_FORWARD={label:'下一页',forms:['下一页','下页','下一頁']};
@@ -64,7 +64,7 @@ function handleRecognized(alts){const now=performance.now();if(now-lastCommandAt
 function makeRecognition(continuous=true){if(!SpeechRecognition)return null;const r=new SpeechRecognition();r.lang='zh-CN';r.continuous=continuous;r.interimResults=false;r.maxAlternatives=5;return r}
 function stopRecognition(){recognitionWanted=false;clearTimeout(recognitionRestartTimer);recognitionRestartTimer=0;if(recognition){recognition.onend=null;try{recognition.abort()}catch{}recognition=null}recognitionActive=false}
 function startRecognition(){if(!SpeechRecognition)throw new Error('nospeech');stopRecognition();recognitionWanted=true;const r=makeRecognition(true);recognition=r;r.onstart=()=>{recognitionActive=true;permission.hidden=true;defaultStatus()};r.onresult=e=>{for(let i=e.resultIndex;i<e.results.length;i++){const res=e.results[i];if(!res.isFinal)continue;const alts=[];for(let j=0;j<res.length;j++)alts.push(res[j].transcript);handleRecognized(alts)}};r.onerror=e=>{recognitionActive=false;if(['not-allowed','service-not-allowed','audio-capture'].includes(e.error)){recognitionWanted=false;permission.hidden=false;permissionTitle.textContent='需要麦克风';permissionHint.textContent='允许语音识别后，就可以直接说口令翻页。';permissionAction.textContent='开启'}};r.onend=()=>{recognitionActive=false;if(recognitionWanted&&!document.hidden){clearTimeout(recognitionRestartTimer);recognitionRestartTimer=setTimeout(()=>{try{r.start()}catch{}},220)}};r.start();defaultStatus()}
-function refreshCommandUI(){if(forwardPhrase)forwardPhrase.textContent=forwardCommand.label;if(backPhrase)backPhrase.textContent=backCommand.label}
+function refreshCommandUI(){forwardPhrase.textContent=forwardCommand.label;backPhrase.textContent=backCommand.label}
 function captureCommand(dir){if(!SpeechRecognition){setStatus('当前浏览器不支持口令识别',false,false);return}stopRecognition();captureDirection=dir;capture.hidden=false;captureTitle.textContent=dir==='forward'?'说一次向前口令':'说一次返回口令';captureHint.textContent='说一个平时不会随口讲出的短词或短句，准确率会更高。';const r=makeRecognition(false);captureRecognizer=r;let done=false;const finish=()=>{captureRecognizer=null;captureDirection=null;capture.hidden=true;if(controlMode==='command')try{startRecognition()}catch{showPermission('command')}};r.onresult=e=>{if(done)return;const res=e.results[e.resultIndex]||e.results[0],forms=[];for(let j=0;j<res.length;j++){const t=cleanPhrase(res[j].transcript);if(t&&!forms.includes(t))forms.push(t)}if(!forms.length)return;done=true;const cmd={label:res[0].transcript.trim(),forms};if(dir==='forward'){forwardCommand=cmd;saveCommand('handsfree-forward-command-v7',cmd)}else{backCommand=cmd;saveCommand('handsfree-back-command-v7',cmd)}refreshCommandUI();navigator.vibrate?.(12);finish()};r.onerror=()=>{if(done)return;done=true;captureHint.textContent='这次没有听清，再说一次。';setTimeout(finish,700)};r.onend=()=>{if(!done){done=true;finish()}};try{r.start()}catch{finish()}}
 
 function blendMap(result){const cats=result?.faceBlendshapes?.[0]?.categories||[],m={};for(const c of cats){const k=String(c.categoryName||c.displayName||'').replace(/[_\s-]/g,'').toLowerCase();m[k]=Number(c.score)||0}return{pucker:m.mouthpucker||0,funnel:m.mouthfunnel||0,jaw:m.jawopen||0,smile:Math.max(m.mouthsmileleft||0,m.mouthsmileright||0),stretch:Math.max(m.mouthstretchleft||0,m.mouthstretchright||0),press:Math.max(m.mouthpressleft||0,m.mouthpressright||0),close:m.mouthclose||0}}
@@ -80,9 +80,9 @@ function cleanupVideo(){cancelAnimationFrame(faceLoop);faceLoop=0;if(videoStream
 function cleanupControl(){stopRecognition();cleanupVideo();capture.hidden=true;if(captureRecognizer){try{captureRecognizer.abort()}catch{}captureRecognizer=null}setStatus('免手操作未开启',false,false)}
 function showPermission(mode){permission.hidden=false;permission.dataset.mode=mode;permissionTitle.textContent=mode==='command'?'开启口令':'开启无声嘴型';permissionHint.textContent=mode==='command'?`默认直接说“${forwardCommand.label}”和“${backCommand.label}”。也可以在“动作”里各说一次自己的口令。`:'只开前置相机。不会显示自拍画面，只显示一个由嘴部关键点画出的轮廓。';permissionAction.textContent='开启'}
 async function prepareControl(mode,auto=false){controlMode=mode;localStorage.setItem('handsfree-mode-v7',mode);cleanupControl();actionSheet.hidden=true;permission.hidden=true;if(mode==='command'){if(!SpeechRecognition){showPermission(mode);permissionTitle.textContent='当前浏览器不支持口令';permissionHint.textContent='可以改用无声嘴型。';return}if(auto){try{startRecognition();return}catch{}}showPermission(mode)}else{if(auto){try{await setupMouth();return}catch{cleanupVideo()}}showPermission(mode)}}
-async function activateMode(mode){permissionAction.disabled=true;try{if(mode==='command')startRecognition();else await setupMouth();permission.hidden=true}catch(e){console.error(e);cleanupControl();permission.hidden=false;permissionTitle.textContent='没有准备好';permissionHint.textContent=mode==='command'?'需要浏览器的语音识别权限。':'需要前置相机权限，而且嘴部需要在镜头范围内。';permissionAction.textContent='再试一次'}finally{permissionAction.disabled=false}}
+async function activateMode(mode){controlMode=mode;localStorage.setItem('handsfree-mode-v7',mode);permissionAction.disabled=true;try{cleanupControl();if(mode==='command')startRecognition();else await setupMouth();permission.hidden=true}catch(e){console.error(e);cleanupControl();permission.hidden=false;permissionTitle.textContent='没有准备好';permissionHint.textContent=mode==='command'?'需要浏览器的语音识别权限。':'需要前置相机权限，而且嘴部需要在镜头范围内。';permissionAction.textContent='再试一次'}finally{permissionAction.disabled=false}}
 function openActionSheet(){refreshCommandUI();actionSheet.hidden=false;commandSetup.hidden=true;actionOptions.hidden=false;actionOptions.querySelectorAll('[data-mode]').forEach(b=>{b.classList.toggle('active',b.dataset.mode===controlMode);b.querySelector('em').textContent=b.dataset.mode===controlMode?'当前':'选择'})}
-function openCommandSetup(){refreshCommandUI();actionOptions.hidden=true;commandSetup.hidden=false}
+function openCommandSetup(){refreshCommandUI();actionSheet.hidden=false;actionOptions.hidden=true;commandSetup.hidden=false}
 
 async function closeReader(){cleanupControl();await releaseWake();try{renderTask?.cancel()}catch{}renderTask=null;pdfDoc=null;kind=null;pages=[];clearOwned();reader.hidden=true;home.hidden=false;pasteSheet.hidden=true;actionSheet.hidden=true;permission.hidden=true;filesInput.value='';setLoading(false);window.scrollTo({top:0,behavior:'instant'})}
 
@@ -94,8 +94,9 @@ pasteModes.querySelectorAll('button').forEach(b=>b.onclick=()=>{pasteMode=b.data
 pasteUse.onclick=async()=>{const t=pasteText.value.trim();if(!t)return;pasteSheet.hidden=true;clearOwned();cleanupControl();await openText(t,pasteMode,'文字')};
 actionBtn.onclick=openActionSheet;
 actionClose.onclick=()=>actionSheet.hidden=true;
-actionOptions.querySelectorAll('[data-mode]').forEach(b=>b.onclick=async()=>{const m=b.dataset.mode;if(m==='command'){controlMode='command';localStorage.setItem('handsfree-mode-v7','command');openCommandSetup()}else{actionSheet.hidden=true;await prepareControl('mouth',false)}});
-changeForward.onclick=()=>captureCommand('forward');changeBack.onclick=()=>captureCommand('back');
+actionOptions.querySelectorAll('[data-mode]').forEach(b=>b.onclick=async()=>{const m=b.dataset.mode;if(m==='command'){await prepareControl('command',true);openCommandSetup()}else{actionSheet.hidden=true;await prepareControl('mouth',false)}});
+changeForward.onclick=()=>captureCommand('forward');
+changeBack.onclick=()=>captureCommand('back');
 resetCommands.onclick=()=>{forwardCommand=DEFAULT_FORWARD;backCommand=DEFAULT_BACK;try{localStorage.removeItem('handsfree-forward-command-v7');localStorage.removeItem('handsfree-back-command-v7')}catch{}refreshCommandUI();if(controlMode==='command'){try{startRecognition()}catch{}}};
 permissionAction.onclick=()=>activateMode(permission.dataset.mode||controlMode);
 captureCancel.onclick=()=>{try{captureRecognizer?.abort()}catch{}captureRecognizer=null;capture.hidden=true;captureDirection=null;if(controlMode==='command')try{startRecognition()}catch{showPermission('command')}};
