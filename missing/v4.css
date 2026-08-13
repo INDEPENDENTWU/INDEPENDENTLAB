@@ -1,0 +1,11 @@
+/* v4 — keep every roster action inside the roster row; no floating controls. */
+.roster-file{grid-template-columns:minmax(0,1fr) auto;gap:18px;min-height:84px;padding:0}
+.roster-file>.roster-quick{position:static;right:auto;bottom:auto;z-index:auto;grid-column:2;display:flex;align-items:center;justify-content:flex-end;gap:14px;min-width:max-content}
+.roster-file>.roster-quick button{appearance:none;border:0;background:transparent;color:var(--blue);padding:12px 0;font:inherit;font-size:10px;font-weight:720;white-space:nowrap}
+.roster-file>.roster-quick button:last-child{color:#98948d;font-weight:620}
+.roster-file>div:first-child{grid-column:1;grid-row:1}
+@media(max-width:660px){
+  .roster-file{grid-template-columns:minmax(0,1fr) auto;gap:12px;min-height:82px}
+  .roster-file>.roster-quick{gap:12px}
+  .roster-file>.roster-quick button{font-size:10px}
+}
