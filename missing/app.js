@@ -1,70 +1,39 @@
 (()=>{
 'use strict';
 const $=s=>document.querySelector(s);
-const intro=$('#intro'),rosterText=$('#rosterText'),rosterCount=$('#rosterCount'),rosterEdit=$('#rosterEdit'),editRoster=$('#editRoster'),pick=$('#pick'),filesInput=$('#files'),error=$('#error');
-const result=$('#result'),back=$('#back'),again=$('#again'),batchMeta=$('#batchMeta'),submitted=$('#submitted'),total=$('#total'),summaryText=$('#summaryText');
-const missingBlock=$('#missingBlock'),missingCount=$('#missingCount'),missingList=$('#missingList'),duplicateBlock=$('#duplicateBlock'),duplicateCount=$('#duplicateCount'),duplicateList=$('#duplicateList'),unmatchedBlock=$('#unmatchedBlock'),unmatchedCount=$('#unmatchedCount'),unmatchedList=$('#unmatchedList'),copyMissing=$('#copyMissing'),changeRoster=$('#changeRoster');
-let roster=[],batch=[],manual=new Map(),lastMissing=[];
-const STORE='missing-roster-v1';
+const intro=$('#intro'),rosterState=$('#rosterState'),rosterName=$('#rosterName'),rosterCount=$('#rosterCount'),pickRoster=$('#pickRoster'),rosterInput=$('#rosterFile'),pickBatch=$('#pickBatch'),batchInput=$('#batchFiles'),error=$('#error'),busy=$('#busy');
+const result=$('#result'),back=$('#back'),again=$('#again'),batchMeta=$('#batchMeta'),submitted=$('#submitted'),total=$('#total'),summaryText=$('#summaryText'),missingCount=$('#missingCount'),missingList=$('#missingList'),duplicateBlock=$('#duplicateBlock'),duplicateCount=$('#duplicateCount'),duplicateList=$('#duplicateList'),unmatchedBlock=$('#unmatchedBlock'),unmatchedCount=$('#unmatchedCount'),unmatchedList=$('#unmatchedList'),copyMissing=$('#copyMissing'),changeRoster=$('#changeRoster');
+let roster=[],lastMissing=[],pdfjs=null,zipLib=null;const STORE='missing-roster-v2';
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function setError(t=''){error.hidden=!t;error.textContent=t}
-function compact(s){return String(s||'').normalize('NFKC').toLowerCase().replace(/\.[a-z0-9]{1,8}$/i,'').replace(/[\s\-_.—–·•~`!@#$%^&*+=|\\/:;；,，、()（）\[\]【】{}<>《》'"“”‘’]+/g,'')}
-function normalizeAlias(s){return compact(s).replace(/^(姓名|名字|学号|编号|id)/i,'')}
-function splitRoster(raw){let lines=String(raw||'').replace(/\r/g,'').split('\n').map(x=>x.trim()).filter(Boolean);if(lines.length===1&&/[，,、;；]/.test(lines[0]))lines=lines[0].split(/[，,、;；]+/).map(x=>x.trim()).filter(Boolean);return [...new Set(lines)]}
-function personFromLine(line,index){
-  let cols=line.includes('\t')?line.split(/\t+/):line.includes(',')?line.split(/,+/):line.split(/\s+/);cols=cols.map(x=>x.trim()).filter(Boolean);
-  const ids=cols.filter(x=>/^(?=.*\d)[a-z0-9_-]{3,24}$/i.test(x));
-  let nameParts=cols.filter(x=>!ids.includes(x));
-  let name=nameParts.join(' ').trim()||line.trim();
-  if(nameParts.length>1&&nameParts.every(x=>/[\u3400-\u9fff]/.test(x)&&x.length<=8))name=nameParts[0];
-  const aliases=[];
-  const add=(value,type)=>{const v=normalizeAlias(value);if(v.length>=2&&!aliases.some(a=>a.v===v))aliases.push({v,type})};
-  ids.forEach(x=>add(x,'id'));
-  add(name,'name');
-  if(/^[a-z\s.'-]+$/i.test(name)&&name.trim().includes(' ')){const parts=name.toLowerCase().split(/\s+/).filter(Boolean);add(parts.join(''),'name');if(parts.length===2)add(parts.slice().reverse().join(''),'name')}
-  if(cols.length>1){for(const c of cols){if(/^[\u3400-\u9fff]{2,5}$/.test(c))add(c,'name')}}
-  return{index,line,label:name||line,ids,aliases}
-}
-function parseRoster(raw){
-  const people=splitRoster(raw).map(personFromLine);
-  const freq=new Map();for(const p of people)for(const a of p.aliases)freq.set(a.v,(freq.get(a.v)||0)+1);
-  for(const p of people)p.aliases=p.aliases.filter(a=>a.type==='id'||freq.get(a.v)===1);
-  return people
-}
-function saveRoster(){try{localStorage.setItem(STORE,rosterText.value)}catch{}}
-function updateRoster(collapse=false){roster=parseRoster(rosterText.value);rosterCount.textContent=roster.length?`已记住 ${roster.length} 人`:'还没记名单';pick.disabled=!roster.length;editRoster.hidden=!roster.length;saveRoster();if(collapse&&roster.length)rosterEdit.hidden=true}
-function fileCompact(name){return compact(String(name||'').replace(/\.(tar\.gz|tar\.bz2|tar\.xz)$/i,''))}
-function autoMatch(file){
-  const hay=fileCompact(file.name),hits=[];
-  for(const p of roster){let best=0,why='';for(const a of p.aliases){if(!a.v||!hay.includes(a.v))continue;const score=(a.type==='id'?220:100)+a.v.length*4;if(score>best){best=score;why=a.v}}if(best)hits.push({person:p,score:best,why})}
-  hits.sort((a,b)=>b.score-a.score||b.why.length-a.why.length);
-  if(!hits.length)return null;
-  if(hits.length>1&&hits[0].score===hits[1].score)return null;
-  return hits[0].person.index
-}
-function compute(){
-  const assignments=roster.map(()=>[]),unmatched=[];
-  batch.forEach((file,i)=>{let pi=manual.has(i)?manual.get(i):autoMatch(file);if(Number.isInteger(pi)&&roster[pi])assignments[pi].push({file,index:i,manual:manual.has(i)});else unmatched.push({file,index:i})});
-  const missing=[],dupes=[];assignments.forEach((arr,i)=>{if(!arr.length)missing.push(roster[i]);else if(arr.length>1)dupes.push({person:roster[i],files:arr})});
-  return{assignments,missing,dupes,unmatched,submitted:assignments.filter(x=>x.length).length}
-}
+function setBusy(on,t='正在看文件名'){busy.hidden=!on;busy.textContent=t;pickBatch.disabled=on||!roster.length;pickRoster.disabled=on}
+function compact(s){return String(s||'').normalize('NFKC').toLowerCase().replace(/\.(tar\.gz|tar\.bz2|tar\.xz|[a-z0-9]{1,8})$/i,'').replace(/[\s\-_.—–·•~`!@#$%^&*+=|\\/:;；,，、()（）\[\]【】{}<>《》'"“”‘’]+/g,'')}
+function alias(v){return compact(v).replace(/^(姓名|名字|学号|编号|id)/i,'')}
+function maybeId(s){return /^(?=.*\d)[a-z0-9_-]{3,24}$/i.test(s)}
+function makePerson(cells,index){const raw=cells.map(x=>String(x||'').trim()).filter(Boolean);if(!raw.length)return null;const ids=raw.filter(maybeId);let name='';for(const c of raw){if(/^[\u3400-\u9fff·]{2,8}$/.test(c)&&!maybeId(c)){name=c;break}}if(!name){const words=raw.filter(x=>!maybeId(x)&&/^[A-Za-z][A-Za-z .'-]{1,40}$/.test(x));if(words.length)name=words[0].trim()}if(!name&&raw.length===1&&!/^\d+$/.test(raw[0]))name=raw[0];if(!name&&!ids.length)return null;const aliases=[];const add=(v,type)=>{const x=alias(v);if(x.length>=2&&!aliases.some(a=>a.v===x))aliases.push({v:x,type})};ids.forEach(x=>add(x,'id'));if(name){add(name,'name');if(/^[A-Za-z .'-]+$/.test(name)&&name.includes(' ')){const p=name.toLowerCase().split(/\s+/).filter(Boolean);add(p.join(''),'name');add([...p].reverse().join(''),'name')}}return{index,label:name||ids[0],ids,aliases,raw}}
+function finalizeRoster(rows,source='名单'){const people=[];for(const cells of rows){const p=makePerson(cells,people.length);if(p)people.push(p)}const freq=new Map();for(const p of people)for(const a of p.aliases)freq.set(a.v,(freq.get(a.v)||0)+1);for(const p of people)p.aliases=p.aliases.filter(a=>a.type==='id'||freq.get(a.v)===1);const unique=[],seen=new Set();for(const p of people){const key=p.ids[0]||alias(p.label);if(!key||seen.has(key))continue;seen.add(key);p.index=unique.length;unique.push(p)}if(unique.length<2)throw new Error('roster');roster=unique;try{localStorage.setItem(STORE,JSON.stringify({source,people:roster}))}catch{}syncRoster(source)}
+function syncRoster(source=''){const has=roster.length>0;rosterState.classList.toggle('ready',has);rosterName.textContent=has?(source||'已记住名单'):'还没有名单';rosterCount.textContent=has?`${roster.length} 人`:'支持 Excel、CSV、TXT、PDF、DOCX';pickBatch.disabled=!has}
+function restore(){try{const v=JSON.parse(localStorage.getItem(STORE)||'null');if(v?.people?.length){roster=v.people;syncRoster(v.source||'已记住名单')}}catch{}}
+async function loadZip(){if(zipLib)return zipLib;for(const u of ['https://cdn.jsdelivr.net/npm/jszip@3.10.1/+esm','https://esm.sh/jszip@3.10.1']){try{const m=await import(u);zipLib=m.default||m;return zipLib}catch{}}throw new Error('zip')}
+async function loadPdf(){if(pdfjs)return pdfjs;for(const u of ['https://cdn.jsdelivr.net/npm/pdfjs-dist@6.2.108/legacy/build/pdf.mjs','https://unpkg.com/pdfjs-dist@6.2.108/legacy/build/pdf.mjs']){try{pdfjs=await import(u);pdfjs.GlobalWorkerOptions.workerSrc=u.replace('pdf.mjs','pdf.worker.mjs');return pdfjs}catch{}}throw new Error('pdf')}
+function textRows(text){return String(text).replace(/\r/g,'').split('\n').map(l=>l.trim()).filter(Boolean).map(l=>l.includes('\t')?l.split(/\t+/):l.includes(',')?l.split(/,+/):l.split(/\s{2,}|\s+/)).map(r=>r.map(x=>x.trim()).filter(Boolean))}
+async function xlsxRows(buf){const JSZip=await loadZip(),zip=await JSZip.loadAsync(buf),shared=[];const ss=await zip.file('xl/sharedStrings.xml')?.async('text');if(ss){const doc=new DOMParser().parseFromString(ss,'application/xml');for(const si of doc.querySelectorAll('si'))shared.push([...si.querySelectorAll('t')].map(x=>x.textContent).join(''))}let sheet=zip.file('xl/worksheets/sheet1.xml');if(!sheet){const names=Object.keys(zip.files).filter(x=>/^xl\/worksheets\/sheet\d+\.xml$/.test(x)).sort();sheet=zip.file(names[0])}if(!sheet)throw new Error('xlsx');const xml=await sheet.async('text'),doc=new DOMParser().parseFromString(xml,'application/xml'),rows=[];for(const r of doc.querySelectorAll('row')){const cells=[];for(const c of r.querySelectorAll('c')){const t=c.getAttribute('t'),v=c.querySelector('v')?.textContent||'',inline=[...c.querySelectorAll('is t')].map(x=>x.textContent).join('');cells.push(t==='s'?shared[Number(v)]??v:t==='inlineStr'?inline:v)}if(cells.some(Boolean))rows.push(cells)}return rows}
+async function pdfRows(buf,maxPages=8){const lib=await loadPdf(),doc=await lib.getDocument({data:new Uint8Array(buf)}).promise,rows=[];for(let p=1;p<=Math.min(maxPages,doc.numPages);p++){const page=await doc.getPage(p),tc=await page.getTextContent(),groups=[];for(const it of tc.items){const y=Math.round((it.transform?.[5]||0)/3)*3,x=it.transform?.[4]||0;let g=groups.find(q=>Math.abs(q.y-y)<=3);if(!g){g={y,items:[]};groups.push(g)}g.items.push({x,t:it.str})}groups.sort((a,b)=>b.y-a.y);for(const g of groups){g.items.sort((a,b)=>a.x-b.x);const line=g.items.map(x=>x.t).join(' ').trim();if(line)rows.push(line.split(/\s{2,}|\s+/))}}return rows}
+async function docxRows(buf){const JSZip=await loadZip(),zip=await JSZip.loadAsync(buf),xml=await zip.file('word/document.xml')?.async('text');if(!xml)throw new Error('docx');const doc=new DOMParser().parseFromString(xml,'application/xml'),rows=[];for(const p of doc.querySelectorAll('w\\:p,p')){const t=[...p.querySelectorAll('w\\:t,t')].map(x=>x.textContent).join('').trim();if(t)rows.push(t.split(/\t+|\s{2,}|\s+/))}return rows}
+async function readRosterFile(file){const name=file.name.toLowerCase(),buf=await file.arrayBuffer();if(/\.xlsx$/.test(name))return xlsxRows(buf);if(/\.pdf$/.test(name))return pdfRows(buf);if(/\.docx$/.test(name))return docxRows(buf);if(/\.(csv|tsv|txt)$/.test(name))return textRows(new TextDecoder('utf-8').decode(buf));throw new Error('type')}
+function directMatch(name){const hay=compact(name),hits=[];for(const p of roster){let best=0;for(const a of p.aliases){if(!a.v||!hay.includes(a.v))continue;best=Math.max(best,(a.type==='id'?300:120)+a.v.length*5)}if(best)hits.push({i:p.index,score:best})}hits.sort((a,b)=>b.score-a.score);if(!hits.length||hits.length>1&&hits[0].score===hits[1].score)return null;return hits[0].i}
+function contentMatch(text){const hay=compact(text),hits=[];for(const p of roster){let best=0;for(const a of p.aliases){if(!a.v||!hay.includes(a.v))continue;best=Math.max(best,(a.type==='id'?260:100)+a.v.length*4)}if(best)hits.push({i:p.index,score:best})}hits.sort((a,b)=>b.score-a.score);if(!hits.length||hits.length>1&&hits[0].score===hits[1].score)return null;return hits[0].i}
+async function fileText(file){const n=file.name.toLowerCase();try{if(/\.(txt|md|csv|tsv)$/.test(n))return(await file.text()).slice(0,10000);if(/\.docx$/.test(n))return(await docxRows(await file.arrayBuffer())).flat().join(' ').slice(0,10000);if(/\.xlsx$/.test(n))return(await xlsxRows(await file.arrayBuffer())).flat().join(' ').slice(0,10000);if(/\.pdf$/.test(n))return(await pdfRows(await file.arrayBuffer(),2)).flat().join(' ').slice(0,10000)}catch{}return''}
+async function zipEntries(file){const JSZip=await loadZip(),zip=await JSZip.loadAsync(await file.arrayBuffer()),out=[];for(const [name,e] of Object.entries(zip.files)){if(e.dir||/(^|\/)__MACOSX\//.test(name))continue;out.push({name:name.split('/').pop(),zipEntry:e})}return out}
+async function entryText(entry){const n=entry.name.toLowerCase();try{if(/\.(txt|md|csv|tsv)$/.test(n))return(await entry.zipEntry.async('text')).slice(0,10000);if(/\.docx$/.test(n))return(await docxRows(await entry.zipEntry.async('arraybuffer'))).flat().join(' ').slice(0,10000);if(/\.xlsx$/.test(n))return(await xlsxRows(await entry.zipEntry.async('arraybuffer'))).flat().join(' ').slice(0,10000);if(/\.pdf$/.test(n))return(await pdfRows(await entry.zipEntry.async('arraybuffer'),2)).flat().join(' ').slice(0,10000)}catch{}return''}
+async function collect(files){const items=[];for(const f of files){if(/\.zip$/i.test(f.name)){try{items.push(...await zipEntries(f))}catch{items.push({name:f.name,file:f})}}else items.push({name:f.name,file:f})}return items}
+async function analyzeBatch(files){setBusy(true,'正在对名字');const items=await collect(files),assign=roster.map(()=>[]),unmatched=[];for(let k=0;k<items.length;k++){const item=items[k];busy.textContent=`正在对名字 ${k+1} / ${items.length}`;let pi=directMatch(item.name);if(pi==null){const text=item.zipEntry?await entryText(item):await fileText(item.file);if(text)pi=contentMatch(text)}if(pi==null)unmatched.push(item);else assign[pi].push(item)}const missing=[],dupes=[];assign.forEach((a,i)=>{if(!a.length)missing.push(roster[i]);else if(a.length>1)dupes.push({person:roster[i],items:a})});setBusy(false);return{items,unmatched,missing,dupes,submitted:assign.filter(a=>a.length).length}}
 function row(name,note='',right=''){return`<div class="row"><div class="row-main"><strong>${esc(name)}</strong>${note?`<small>${esc(note)}</small>`:''}</div>${right?`<em>${esc(right)}</em>`:''}</div>`}
-function render(){
-  const r=compute();lastMissing=r.missing;submitted.textContent=String(r.submitted);total.textContent=String(roster.length);batchMeta.textContent=`${batch.length} 个文件`;
-  const extra=r.unmatched.length?`，另有 ${r.unmatched.length} 个文件名没认出来`:'';summaryText.textContent=r.missing.length?`${r.missing.length} 人还没匹配到文件${extra}。`:`名单里的人都匹配到了${extra}。`;
-  missingCount.textContent=`${r.missing.length} 人`;missingList.innerHTML=r.missing.length?r.missing.map(p=>row(p.label,p.ids[0]?`学号 ${p.ids[0]}`:'','未匹配')).join(''):'<div class="empty-row">这批已经收齐。</div>';
-  duplicateBlock.hidden=!r.dupes.length;duplicateCount.textContent=`${r.dupes.length} 人`;duplicateList.innerHTML=r.dupes.map(x=>row(x.person.label,x.files.map(y=>y.file.name).join(' · '),`${x.files.length} 份`)).join('');
-  unmatchedBlock.hidden=!r.unmatched.length;unmatchedCount.textContent=`${r.unmatched.length} 个`;
-  unmatchedList.innerHTML=r.unmatched.map(x=>{const opts=roster.map((p,i)=>`<option value="${i}">${esc(p.label)}</option>`).join('');return`<div class="row unmatched"><div class="row-main"><strong>${esc(x.file.name)}</strong><small>文件名里没有找到唯一姓名或学号</small></div><select data-file="${x.index}" aria-label="手动指定 ${esc(x.file.name)}"><option value="">归给谁</option>${opts}</select></div>`}).join('');
-  unmatchedList.querySelectorAll('select').forEach(s=>s.onchange=()=>{const fi=Number(s.dataset.file),pi=Number(s.value);if(Number.isInteger(pi)&&s.value!=='')manual.set(fi,pi);else manual.delete(fi);render()});
-}
-function openBatch(list){setError('');if(!roster.length){setError('先贴一份名单。');rosterEdit.hidden=false;return}batch=[...list].filter(f=>f&&f.name);if(!batch.length){setError('没有选到文件。');return}manual.clear();intro.hidden=true;result.hidden=false;render();window.scrollTo({top:0,behavior:'instant'})}
-function showIntro(edit=false){result.hidden=true;intro.hidden=false;if(edit){rosterEdit.hidden=false;setTimeout(()=>rosterText.focus(),80)}else if(roster.length)rosterEdit.hidden=true;window.scrollTo({top:0,behavior:'instant'})}
-rosterText.value=(()=>{try{return localStorage.getItem(STORE)||''}catch{return''}})();updateRoster(true);
-let inputTimer=0;rosterText.addEventListener('input',()=>{clearTimeout(inputTimer);inputTimer=setTimeout(()=>updateRoster(false),120)});
-editRoster.onclick=()=>{rosterEdit.hidden=!rosterEdit.hidden;if(!rosterEdit.hidden)rosterText.focus()};
-pick.onclick=()=>filesInput.click();filesInput.onchange=()=>{openBatch(filesInput.files);filesInput.value=''};
-back.onclick=()=>showIntro(false);again.onclick=()=>filesInput.click();changeRoster.onclick=()=>showIntro(true);
-copyMissing.onclick=async()=>{const text=lastMissing.map(x=>x.label).join('\n');if(!text){copyMissing.textContent='已经收齐';setTimeout(()=>copyMissing.textContent='复制没交名单',900);return}try{await navigator.clipboard.writeText(text);copyMissing.textContent='已复制';setTimeout(()=>copyMissing.textContent='复制没交名单',900)}catch{const ta=document.createElement('textarea');ta.value=text;document.body.appendChild(ta);ta.select();try{document.execCommand('copy')}catch{}ta.remove()}};
-document.addEventListener('dragover',e=>{if(e.dataTransfer?.types?.includes('Files'))e.preventDefault()});document.addEventListener('drop',e=>{if(!e.dataTransfer?.files?.length)return;e.preventDefault();openBatch(e.dataTransfer.files)});
+function render(r){lastMissing=r.missing;submitted.textContent=String(r.submitted);total.textContent=String(roster.length);batchMeta.textContent=`${r.items.length} 个文件`;summaryText.textContent=r.missing.length?`${r.missing.length} 人还没找到提交文件${r.unmatched.length?`，另有 ${r.unmatched.length} 个文件还没认出是谁`:''}。`:`名单里的人都找到了${r.unmatched.length?`，但还有 ${r.unmatched.length} 个文件没认出是谁`:''}。`;missingCount.textContent=`${r.missing.length} 人`;missingList.innerHTML=r.missing.length?r.missing.map(p=>row(p.label,p.ids?.[0]?`学号 ${p.ids[0]}`:'','未找到')).join(''):'<div class="empty-row">这批已经收齐。</div>';duplicateBlock.hidden=!r.dupes.length;duplicateCount.textContent=`${r.dupes.length} 人`;duplicateList.innerHTML=r.dupes.map(x=>row(x.person.label,x.items.map(y=>y.name).join(' · '),`${x.items.length} 份`)).join('');unmatchedBlock.hidden=!r.unmatched.length;unmatchedCount.textContent=`${r.unmatched.length} 个`;unmatchedList.innerHTML=r.unmatched.map(x=>row(x.name,'文件名和可读取内容里都没有唯一找到名单中的姓名或学号','未判断')).join('')}
+async function openBatch(list){setError('');if(!roster.length){setError('先选一份名单文件。');return}const files=[...list];if(!files.length)return;try{const r=await analyzeBatch(files);intro.hidden=true;result.hidden=false;render(r);window.scrollTo({top:0,behavior:'instant'})}catch(e){console.error(e);setBusy(false);setError('这批文件没有成功处理。')}}
+restore();if(!roster.length)syncRoster('');
+pickRoster.onclick=()=>rosterInput.click();rosterInput.onchange=async()=>{const f=rosterInput.files?.[0];rosterInput.value='';if(!f)return;setError('');setBusy(true,'正在读取名单');try{const rows=await readRosterFile(f);finalizeRoster(rows,f.name);setBusy(false)}catch(e){console.error(e);setBusy(false);setError(e?.message==='type'?'名单先用 Excel、CSV、TXT、PDF 或 DOCX。':'这份名单没有识别成功。')}};
+pickBatch.onclick=()=>batchInput.click();batchInput.onchange=()=>{openBatch(batchInput.files);batchInput.value=''};
+back.onclick=()=>{result.hidden=true;intro.hidden=false;window.scrollTo({top:0,behavior:'instant'})};again.onclick=()=>batchInput.click();changeRoster.onclick=()=>rosterInput.click();
+copyMissing.onclick=async()=>{const text=lastMissing.map(x=>x.label).join('\n');if(!text){copyMissing.textContent='已经收齐';setTimeout(()=>copyMissing.textContent='复制没交名单',900);return}try{await navigator.clipboard.writeText(text);copyMissing.textContent='已复制';setTimeout(()=>copyMissing.textContent='复制没交名单',900)}catch{}};
 })();
