@@ -1,0 +1,10 @@
+(()=>{
+  const $=s=>document.querySelector(s),form=$('#form'),intro=$('#intro'),result=$('#result'),gap=$('#gap'),keepBox=$('#keep'),error=$('#error'),back=$('#back'),reset=$('#reset'),dropEl=$('#drop'),verdictLabel=$('#verdictLabel'),verdictText=$('#verdictText'),cutDepth=$('#cutDepth'),scoreLine=$('#scoreLine'),steps=$('#steps');
+  let keep=1;
+  const n=v=>Number(String(v).replace(',','.')),fmt=v=>Math.abs(v-Math.round(v))<.04?String(Math.round(v)):v.toFixed(1),clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+  function setError(t=''){error.hidden=!t;error.textContent=t}
+  function stepList(a){steps.innerHTML=a.map(t=>`<li>${t}</li>`).join('')}
+  function show(e){e.preventDefault();setError('');const empty=n(gap.value);if(!Number.isFinite(empty)||empty<=0||empty>80){setError('量一下物品顶部到纸箱原折线之间的空隙，填 0–80 cm。');return}const drop=Math.max(0,empty-keep);intro.hidden=true;result.hidden=false;window.scrollTo({top:0,behavior:'instant'});if(drop<.8){verdictLabel.textContent='不用改';dropEl.textContent='0 cm';cutDepth.textContent='不用剪';verdictText.textContent=`顶部空隙 ${fmt(empty)} cm，保留 ${fmt(keep)} cm 后已经很接近，不值得为了这点高度破坏纸箱。`;scoreLine.style.bottom='26px';stepList(['把物品固定好，顶部和四周按需要补少量缓冲材料。','正常合盖并封箱即可。']);return}verdictLabel.textContent='从原顶折线往下';dropEl.textContent=`${fmt(drop)} cm`;cutDepth.textContent=`${fmt(drop)} cm`;verdictText.textContent=`你量到上方空 ${fmt(empty)} cm，保留 ${fmt(keep)} cm 后，纸箱可以降低约 ${fmt(drop)} cm。`;scoreLine.style.bottom=`${clamp(28+drop*3,38,92)}px`;stepList([`在四个竖角上，从原来的顶盖折线往下量 ${fmt(drop)} cm，各做一个记号。`,`把四个记号沿纸箱四面连成一圈；沿这圈轻压出新的折线，不要切穿。`,`只剪四条竖角：从原顶折线往下剪 ${fmt(drop)} cm，剪到新折线就停。`,`把原来的四片顶盖沿新折线向内折，再正常封箱。`])}
+  keepBox.querySelectorAll('button').forEach(b=>b.onclick=()=>{keep=Number(b.dataset.v)||0;keepBox.querySelectorAll('button').forEach(x=>x.classList.toggle('active',x===b))});
+  form.onsubmit=show;back.onclick=()=>{result.hidden=true;intro.hidden=false};reset.onclick=()=>{gap.value='';keep=1;keepBox.querySelectorAll('button').forEach(x=>x.classList.toggle('active',x.dataset.v==='1'));result.hidden=true;intro.hidden=false;setError('');gap.focus()};
+})();
