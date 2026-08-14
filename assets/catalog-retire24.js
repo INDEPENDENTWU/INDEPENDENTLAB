@@ -1,0 +1,1 @@
+(()=>{'use strict';const item=document.querySelector('.catalog a[href="./wiggle/"]');if(item)item.remove();const edition=document.querySelector('.edition');if(edition)edition.textContent='23 / 2026';})();
