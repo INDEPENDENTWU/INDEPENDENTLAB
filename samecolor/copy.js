@@ -1,0 +1,1 @@
+(()=>{'use strict';const quality=document.getElementById('quality');if(!quality)return;const clean=()=>{if(quality.textContent.trim()==='这两个位置可以直接比较。')quality.textContent=''};clean();new MutationObserver(clean).observe(quality,{childList:true,characterData:true,subtree:true})})();
