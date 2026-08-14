@@ -1,0 +1,1 @@
+(()=>{'use strict';const detail=document.getElementById('detail');if(!detail)return;const clean=()=>{if(detail.textContent.trim()==='本机处理')detail.textContent=''};clean();new MutationObserver(clean).observe(detail,{childList:true,characterData:true,subtree:true})})();
