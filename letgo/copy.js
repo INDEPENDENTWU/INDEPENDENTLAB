@@ -1,0 +1,1 @@
+(()=>{'use strict';const label=document.getElementById('resultLabel');if(!label)return;const clean=()=>{if(label.textContent==='结论')label.textContent='';if(label.textContent==='一致')label.textContent='一样'};clean();new MutationObserver(clean).observe(label,{childList:true,characterData:true,subtree:true})})();
