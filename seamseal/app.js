@@ -6,6 +6,7 @@ const pageCount=$('#pageCount'),foundCount=$('#foundCount'),issueCount=$('#issue
 const restoreCanvas=$('#restoreCanvas'),restoreMeta=$('#restoreMeta'),positionInput=$('#position'),positionReset=$('#positionReset'),widthInput=$('#width'),widthReset=$('#widthReset'),issues=$('#issues'),issuesMeta=$('#issuesMeta'),issueList=$('#issueList'),saveBtn=$('#save'),note=$('#note');
 let pdfjs=null,pages=[],detection=null,measure=null,lastBuilt=null,forcedSide='auto',isReverse=false,manualCenter=null,runId=0;
 function setError(t=''){error.hidden=!t;error.textContent=t}
+function toTop(){document.documentElement.scrollTop=0;document.body.scrollTop=0;window.scrollTo(0,0);requestAnimationFrame(()=>{document.documentElement.scrollTop=0;document.body.scrollTop=0;window.scrollTo(0,0)})}
 async function loadPdf(){if(pdfjs)return pdfjs;let last;for(const u of['https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/legacy/build/pdf.mjs','https://unpkg.com/pdfjs-dist@4.10.38/legacy/build/pdf.mjs']){try{const m=await import(u);m.GlobalWorkerOptions.workerSrc=u.replace('pdf.mjs','pdf.worker.mjs');pdfjs=m;return m}catch(e){last=e}}throw last||new Error('pdfjs')}
 function targetWidth(n){return n<=36?620:n<=80?520:n<=140?455:410}
 async function readPages(file,id){
@@ -27,7 +28,7 @@ async function readPages(file,id){
 function syncControls(){leftBtn.classList.toggle('active',detection?.side==='left');rightBtn.classList.toggle('active',detection?.side==='right');forward.classList.toggle('active',!isReverse);reverse.classList.toggle('active',isReverse)}
 function copyCanvas(source,target){target.width=source.width;target.height=source.height;target.getContext('2d').drawImage(source,0,0)}
 function renderIssues(report){
-  const rows=[];for(const p of report.pages)rows.push({no:String(p).padStart(2,'0'),text:`第 ${p} 页`,detail:'没找到明显印章'});for(const [a,b] of report.seams)rows.push({no:`${a}/${b}`,text:`第 ${a} / ${b} 页`,detail:'接缝差得比较多'});
+  const rows=[];for(const p of report.pages)rows.push({no:String(p).padStart(2,'0'),text:`第 ${p} 页`,detail:'没找到明显印章'});for(const [a,b] of report.seams)rows.push({no:`${a}/${b}`,text:`第 ${a} / ${b} 页`,detail:'两页边上的印迹接不上'});
   issues.hidden=!rows.length;issuesMeta.textContent=rows.length?`${rows.length} 处`:'';issueList.innerHTML=rows.map(x=>`<div class="issue-row"><i>${x.no}</i><strong>${x.text}</strong><b>${x.detail}</b></div>`).join('');
 }
 function applyManualBand(d){
@@ -36,21 +37,21 @@ function applyManualBand(d){
 function renderCurrent({resetWidth=false,resetPosition=false}={}){
   if(!pages.length)return;detection=chooseDetection(pages,forcedSide);if(resetPosition){manualCenter=null;positionInput.value=String(Math.round((detection.band.start+detection.band.end)*50))}detection=applyManualBand(detection);measure=measurePages(pages,detection);const report=issueSummary(measure),found=measure.rows.filter(x=>x.found).length,coverage=found/pages.length;
   pageCount.textContent=String(pages.length);foundCount.textContent=String(found);issueCount.textContent=String(report.count);
-  if(found<2||coverage<.16){verdict.textContent='没找到明显骑缝章';summary.textContent='可以换到另一边，或把上下位置移到印章那里。'}
-  else if(report.count){verdict.textContent=`${report.count} 处需要看`;summary.textContent='下面已经按页拼好，直接看断开的地方。'}
-  else{verdict.textContent='每页都找到了';summary.textContent='下面已经按页拼好，可以直接看整枚章。'}
+  if(found<2||coverage<.16){verdict.textContent='没找到明显骑缝章';summary.textContent='换到另一边，或把上下位置移到印章那里。'}
+  else if(report.count){verdict.textContent=`${report.count} 处需要看`;summary.textContent=''}
+  else{verdict.textContent='每页都找到了';summary.textContent=''}
   if(resetWidth)widthInput.value='100';const widthScale=Number(widthInput.value)/100,last=buildReconstruction(pages,detection,measure,{reverse:isReverse,widthScale});lastBuilt=last;copyCanvas(last.canvas,restoreCanvas);restoreMeta.textContent=`${detection.side==='right'?'右边':'左边'} · ${detection.mode==='red'?'红章':'彩色印迹'}`;renderIssues(report);syncControls();
-  note.textContent=detection.mode==='red'?'适合彩色扫描的骑缝章。黑白复印、很淡的印章或彩色页边可能需要自己看还原图。':'这份文件没有明显红章，当前按其他彩色印迹拼接；如果位置不对，可以换边。';
+  note.textContent=detection.mode==='red'?'黑白复印或很淡的章，直接看还原图。':'没找到明显红章，当前按其他彩色印迹拼接。';
 }
 async function process(file){
-  if(!file)return;if(file.type&&file.type!=='application/pdf'&&!/\.pdf$/i.test(file.name)){setError('请选择 PDF。');return}const id=++runId;setError('');home.hidden=true;work.hidden=false;busy.hidden=false;result.hidden=true;fileName.textContent=file.name;forcedSide='auto';isReverse=false;manualCenter=null;widthInput.value='100';positionInput.value='50';pages=[];detection=measure=lastBuilt=null;
-  try{const read=await readPages(file,id);if(!read||id!==runId)return;pages=read;busyTitle.textContent='正在拼';busyText.textContent='';await new Promise(r=>setTimeout(r,0));busy.hidden=true;result.hidden=false;renderCurrent({resetWidth:true,resetPosition:true});window.scrollTo({top:0,behavior:'instant'})}
-  catch(e){console.error(e);work.hidden=true;home.hidden=false;if(e?.message==='few')setError('至少需要两页 PDF。');else if(e?.message==='many')setError('这份 PDF 超过 220 页，先拆成较小的一份再试。');else if(e?.message==='large')setError('这份 PDF 太大，先压小或拆成几份再试。');else setError('这份 PDF 没有成功打开。')}
+  if(!file)return;if(file.type&&file.type!=='application/pdf'&&!/\.pdf$/i.test(file.name)){setError('请选择 PDF。');return}const id=++runId;setError('');home.hidden=true;work.hidden=false;busy.hidden=false;result.hidden=true;fileName.textContent=file.name;forcedSide='auto';isReverse=false;manualCenter=null;widthInput.value='100';positionInput.value='50';pages=[];detection=measure=lastBuilt=null;toTop();
+  try{const read=await readPages(file,id);if(!read||id!==runId)return;pages=read;busyTitle.textContent='正在拼';busyText.textContent='';await new Promise(r=>requestAnimationFrame(r));busy.hidden=true;result.hidden=false;renderCurrent({resetWidth:true,resetPosition:true});toTop()}
+  catch(e){console.error(e);work.hidden=true;home.hidden=false;toTop();if(e?.message==='few')setError('至少需要两页 PDF。');else if(e?.message==='many')setError('这份 PDF 超过 220 页，先拆成较小的一份再试。');else if(e?.message==='large')setError('这份 PDF 太大，先压小或拆成几份再试。');else setError('这份 PDF 没有成功打开。')}
 }
 function setSide(side){forcedSide=side;manualCenter=null;renderCurrent({resetWidth:true,resetPosition:true})}
 function setOrder(reverseValue){isReverse=reverseValue;renderCurrent()}
 async function saveImage(){if(!lastBuilt?.canvas)return;const canvas=lastBuilt.canvas,blob=await new Promise(r=>canvas.toBlob(r,'image/png'));if(!blob)return;const file=new File([blob],`骑缝还原-${new Date().toISOString().slice(0,10)}.png`,{type:'image/png'});if(navigator.share&&navigator.canShare?.({files:[file]})){try{await navigator.share({files:[file],title:'骑缝还原'});return}catch(e){if(e?.name==='AbortError')return}}const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=file.name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1200)}
-fileInput.onchange=()=>{const f=fileInput.files?.[0];if(f)process(f);fileInput.value=''};change.onclick=()=>fileInput.click();back.onclick=()=>{runId++;pages=[];detection=measure=lastBuilt=null;work.hidden=true;home.hidden=false;window.scrollTo({top:0,behavior:'instant'})};
+fileInput.onchange=()=>{const f=fileInput.files?.[0];if(f)process(f);fileInput.value=''};change.onclick=()=>fileInput.click();back.onclick=()=>{runId++;pages=[];detection=measure=lastBuilt=null;work.hidden=true;home.hidden=false;toTop()};
 leftBtn.onclick=()=>setSide('left');rightBtn.onclick=()=>setSide('right');forward.onclick=()=>setOrder(false);reverse.onclick=()=>setOrder(true);
 positionInput.onchange=()=>{manualCenter=Number(positionInput.value)/100;renderCurrent()};positionReset.onclick=()=>{manualCenter=null;renderCurrent({resetPosition:true})};widthInput.onchange=()=>renderCurrent();widthReset.onclick=()=>{widthInput.value='100';renderCurrent()};saveBtn.onclick=saveImage;
 window.addEventListener('pagehide',()=>{runId++;pages=[]});
