@@ -10,12 +10,12 @@ function parseAnswers(raw){
   const numbered=/((?:^|[\s,;，；|]))(\d{1,4})\s*(?:[.、)）\]:：\-]\s*)?([A-H]{1,4}|T|F|√|×)(?=$|[\s,;，；|])/g;
   let m;while((m=numbered.exec(s)))out.push(m[3]);
   if(out.length>=3)return{answers:out,mode:'numbered'};
-  const compact=s.replace(/[\s,;，；|/\\._:：、()（）\[\]{}<>《》\-]/g,'');
-  if(/^[A-H]{4,1000}$/.test(compact))return{answers:[...compact],mode:'compact'};
   const pieces=s.replace(/\d{1,4}\s*[.、)）\]:：\-]/g,' ').split(/[\s,;，；|/\\]+/).map(x=>x.trim()).filter(Boolean);
   const letterTokens=pieces.filter(x=>/^(?:[A-H]{1,4}|T|F|√|×)$/.test(x));
   if(letterTokens.length>=3)return{answers:letterTokens,mode:'tokens'};
   if(!/[.、)）:：\-]/.test(s)){const nums=pieces.filter(x=>/^[1-8]$/.test(x));if(nums.length>=4&&nums.length===pieces.length)return{answers:nums,mode:'numeric'}}
+  const compact=s.replace(/[\s,;，；|/\\._:：、()（）\[\]{}<>《》\-]/g,'');
+  if(/^[A-H]{4,1000}$/.test(compact))return{answers:[...compact],mode:'compact'};
   return{answers:letterTokens,mode:'tokens'};
 }
 function countsOf(a){const m=new Map;for(const x of a)m.set(x,(m.get(x)||0)+1);return m}
