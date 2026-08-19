@@ -47,8 +47,8 @@ function bandMetrics(imageData,band,mode){
   return{amount,span:maxX-minX+1,centerY:yWeight/Math.max(.001,amount),y0,y1,minX,maxX};
 }
 
-function maskSignature(imageData,band,mode,side,depth=5){
-  const {data,width:w,height:h}=imageData,y0=clamp(Math.floor(band.start*h),0,h-1),y1=clamp(Math.ceil(band.end*h),y0+1,h),out=new Float32Array(y1-y0);let max=0;
+function maskSignature(imageData,band,mode,side){
+  const {data,width:w,height:h}=imageData,y0=clamp(Math.floor(band.start*h),0,h-1),y1=clamp(Math.ceil(band.end*h),y0+1,h),out=new Float32Array(y1-y0),depth=clamp(Math.round(w*.18),8,22);let max=0;
   for(let y=y0;y<y1;y++){let s=0;for(let d=0;d<depth;d++){const x=side==='right'?w-1-d:d;if(x<0||x>=w)continue;const i=(y*w+x)*4;s=Math.max(s,ink(data[i],data[i+1],data[i+2],mode))}out[y-y0]=s;max=Math.max(max,s)}
   if(max>.001)for(let i=0;i<out.length;i++)out[i]/=max;return out;
 }
@@ -62,9 +62,9 @@ export function measurePages(pages,detection){
   const {side,mode,band}=detection,rows=pages.map((p,index)=>{const m=bandMetrics(p[side].image,band,mode),sig=maskSignature(p[side].image,band,mode,side);return{index,page:index+1,...m,sig}});
   const nonzero=rows.filter(x=>x.amount>10),amountMed=med(nonzero.map(x=>x.amount)),spanMed=med(nonzero.map(x=>x.span));
   for(const r of rows){r.found=amountMed>0&&r.amount>Math.max(7,amountMed*.13);r.weak=r.found&&r.amount<amountMed*.34}
-  const seams=[];for(let i=0;i<rows.length-1;i++){const score=rows[i].found&&rows[i+1].found?signatureSimilarity(rows[i].sig,rows[i+1].sig):0;seams.push({after:i+1,before:i+2,score})}
-  const useful=seams.map(x=>x.score).filter(x=>x>0),sMed=med(useful),sLow=sMed?Math.max(.045,sMed*.34):0;
-  for(const s of seams)s.suspicious=sLow>0&&s.score<sLow;
+  const seams=[];for(let i=0;i<rows.length-1;i++){const eligible=rows[i].found&&rows[i+1].found,score=eligible?signatureSimilarity(rows[i].sig,rows[i+1].sig):0;seams.push({after:i+1,before:i+2,score,eligible})}
+  const useful=seams.filter(x=>x.eligible&&x.score>0).map(x=>x.score),sMed=med(useful),sLow=sMed?Math.max(.045,sMed*.34):0;
+  for(const s of seams)s.suspicious=s.eligible&&sLow>0&&s.score<sLow;
   const stripW=pages[0]?.[side]?.image?.width||80,autoWidth=clamp(Math.round(Math.max(8,spanMed+5)),8,Math.round(stripW*.72));
   return{rows,seams,amountMed,spanMed,autoWidth,suspiciousPages:rows.filter(x=>!x.found),suspiciousSeams:seams.filter(x=>x.suspicious)};
 }
